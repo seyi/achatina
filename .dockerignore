@@ -1,0 +1,13 @@
+.git
+.codex
+src
+assets
+notes
+*.png
+*.jpg
+*.jpeg
+*.gif
+node_modules
+dist
+tmp
+.DS_Store

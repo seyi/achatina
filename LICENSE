@@ -1,0 +1,27 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor: Seyi Akadri
+Licensed Work: Claw Lisp (this repository)
+Additional Use Grant: You may use this work for non-production, non-commercial purposes (including evaluation, research, education, and internal prototyping).
+Change Date: 2030-04-28
+Change License: Apache License, Version 2.0
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and make non-production use of the Licensed Work, subject to the limitations in this License.
+
+Production use and commercial use of the Licensed Work are not permitted under this License without a separate commercial license from the Licensor.
+
+For purposes of this License:
+- "Production use" means any use of the Licensed Work in a live, user-facing, revenue-generating, or operational environment.
+- "Commercial use" means any use intended for commercial advantage or monetary compensation, including providing services to third parties.
+
+You must retain this License text in source distributions of the Licensed Work and substantial portions thereof.
+
+On the Change Date, this License automatically converts to the Change License for this Licensed Work, and all rights and obligations under this License are superseded by the Change License.
+
+Disclaimer
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE LICENSOR OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE LICENSED WORK OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.

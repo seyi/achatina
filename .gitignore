@@ -1,0 +1,18 @@
+.claw-lisp/
+# Compiled Lisp artifacts
+*.fasl
+*.fas
+*.lib
+*.abcl
+# Agent-tool drivers and editor workspaces (personal scratch)
+.grok/
+.qwen/
+.venv-review/
+# RAG artifacts (not needed — codebase fits in 2M token context)
+rag_index.py
+rag_query.py
+.rag-index/
+__pycache__/
+*.pyc
+# Environment variables with API keys
+.env
