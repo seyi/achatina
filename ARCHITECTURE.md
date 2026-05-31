@@ -80,6 +80,21 @@ mutable in-memory state as the primary contract.
 Multiple authoring frontends can target the same IR pipeline as long as they
 compile into the same staged representations.
 
+## Local Context Management
+
+The public runtime also includes a deliberate local context-management layer:
+
+- context monitoring
+- microcompaction
+- explicit compaction IR
+
+This is part of the public technical story because it shows how Achatina
+handles non-trivial local runtime pressure without hiding the transition.
+
+See:
+
+- `COMPACTION.md`
+
 ## Public Scope Boundary
 
 This public release is centered on:

@@ -63,6 +63,7 @@ Current public emphasis:
 - local runtime proof
 - IR/CAS architecture
 - execution-plan contract
+- local context-management and compaction architecture
 
 Future backend and orchestration depth may exist outside this public repo.
 
@@ -72,6 +73,7 @@ See:
 
 - `QUICKSTART.md`
 - `ARCHITECTURE.md`
+- `COMPACTION.md`
 - `LICENSING.md`
 
 ## License

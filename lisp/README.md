@@ -47,6 +47,11 @@ The public repo is strongest today as:
 This directory is not just an early scaffold. It is the active implementation
 surface used by the public `docker-load` and `docker-test` workflows.
 
+For the public explanation of the local compaction/context-management story,
+see:
+
+- `../COMPACTION.md`
+
 ## Build and Test
 
 From the repo root:
