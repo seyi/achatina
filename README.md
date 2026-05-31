@@ -76,6 +76,16 @@ See:
 - `COMPACTION.md`
 - `LICENSING.md`
 
+## What To Read First
+
+Use this path by intent:
+
+- if you want to understand what the project is: `README.md`
+- if you want the fastest successful local evaluation path: `QUICKSTART.md`
+- if you want the staged runtime/IR model: `ARCHITECTURE.md`
+- if you want the context-management story: `COMPACTION.md`
+- if you want licensing details: `LICENSING.md`
+
 ## License
 
 Achatina is source-available under **Business Source License 1.1**.

@@ -94,6 +94,34 @@ and inspect the available commands with:
 :help
 ```
 
+## First Interactive Runtime Check
+
+After `make docker-test` passes, the smallest real runtime interaction is to
+open the CLI and inspect the live runtime surface:
+
+```bash
+make docker-cli
+```
+
+Then run:
+
+```text
+:status
+:providers
+:tools
+:cas
+```
+
+What this proves:
+
+- `:status` shows the current session/runtime state
+- `:providers` shows registered provider names
+- `:tools` shows the public tool surface
+- `:cas` shows the configured content-addressed storage roots
+
+This is a better first runtime check than stopping at `:help`, because it shows
+real runtime inspection commands without requiring API keys or provider setup.
+
 ## Current Reality
 
 This repository is strongest today as:
@@ -110,8 +138,9 @@ The launch surface is intentionally focused on those capabilities.
 2. Load the system with `make docker-load`.
 3. Run tests with `make docker-test`.
 4. Start the CLI with `make docker-cli`.
-5. Use `:help` to inspect the interactive surface.
-6. Read `ARCHITECTURE.md` for the staged model.
+5. Run `:status`, `:providers`, `:tools`, and `:cas`.
+6. Use `:help` to inspect the wider interactive surface.
+7. Read `ARCHITECTURE.md` for the staged model.
 
 ## Notes
 
