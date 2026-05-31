@@ -2317,29 +2317,6 @@
     ;; Subject ID discovery (used by search)
     #:discover-subject-ids))
 
-(defpackage #:claw-lisp.cli
-  (:use #:cl)
-  (:import-from #:claw-lisp.core.runtime
-                #:check-provider-configuration
-                #:check-runtime-dependencies
-                #:list-provider-names
-                #:list-tool-names
-                #:make-runtime
-                #:resolve-tool
-                #:submit-user-message
-                #:start-session
-                #:register-tool
-                #:register-default-providers)
-  (:import-from #:claw-lisp.core.domain
-                #:agent-session-conversation
-                #:conversation-messages
-                #:message-content-text
-                #:message-metadata)
-  (:import-from #:claw-lisp.providers.http-utils
-                #:*http-debug-p*)
-  (:export #:main
-           #:main-entry-point))
-
 (defpackage #:claw-lisp.tests
   (:use #:cl)
   (:import-from #:claw-lisp.core.runtime

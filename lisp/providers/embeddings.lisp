@@ -114,12 +114,13 @@ ERRORS:
 INPUTS:
   - texts: list of strings.
   - provider: keyword identifying the provider (e.g., :openai). When NIL,
-    uses (current-embedding-provider).
-  - model: string model name. When NIL, uses (current-embedding-model).
+    uses (claw-lisp.config:current-embedding-provider).
+  - model: string model name. When NIL, uses (claw-lisp.config:current-embedding-model).
   - batch-size: maximum number of texts per provider call. When NIL,
-    uses (current-embedding-max-batch-size).
+    uses (claw-lisp.config:current-embedding-max-batch-size).
   - timeout-seconds: integer timeout hint per provider call. When NIL,
-    uses (runtime-config-embedding-timeout-seconds *runtime-config*).
+    uses (claw-lisp.config:runtime-config-embedding-timeout-seconds
+          claw-lisp.config:*runtime-config*).
   - signal-errors-p: when T (default), embedding errors are signaled as
     EMBEDDING-ERROR. When NIL, errors are logged (if enabled) and this
     function returns NIL.
@@ -133,15 +134,16 @@ ERRORS:
   - EMBEDDING-ERROR when provider resolution or provider call fails and
     SIGNAL-ERRORS-P is T."
   (let* ((texts (or texts '()))
-         (provider (or provider (current-embedding-provider)))
-         (model (or model (current-embedding-model)))
-         (batch-size (or batch-size (current-embedding-max-batch-size)))
+         (provider (or provider (claw-lisp.config:current-embedding-provider)))
+         (model (or model (claw-lisp.config:current-embedding-model)))
+         (batch-size (or batch-size (claw-lisp.config:current-embedding-max-batch-size)))
          (timeout-seconds (or timeout-seconds
-                              (runtime-config-embedding-timeout-seconds *runtime-config*))))
+                              (claw-lisp.config:runtime-config-embedding-timeout-seconds
+                               claw-lisp.config:*runtime-config*))))
     (cond
       ((null texts)
        '())
-      ((not (current-embedding-enabled-p))
+      ((not (claw-lisp.config:current-embedding-enabled-p))
        (if signal-errors-p
            (error 'embedding-error
                   :provider provider
@@ -157,7 +159,8 @@ ERRORS:
                                        :batch-size batch-size
                                        :timeout-seconds timeout-seconds)
          (embedding-error (e)
-           (when (runtime-config-embedding-log-errors-p *runtime-config*)
+           (when (claw-lisp.config:runtime-config-embedding-log-errors-p
+                  claw-lisp.config:*runtime-config*)
              (log-embedding-error e))
            (if signal-errors-p
                (signal e)
@@ -224,9 +227,10 @@ This is a thin wrapper so logging behavior can be customized in one place."
 (defun embedding-provider-supported-models (&optional provider-keyword)
   "Return the list of supported embedding models for PROVIDER-KEYWORD.
 
-When PROVIDER-KEYWORD is NIL, uses (current-embedding-provider).
+When PROVIDER-KEYWORD is NIL, uses (claw-lisp.config:current-embedding-provider).
 Returns NIL if the provider does not expose model information."
-  (let* ((provider-keyword (or provider-keyword (current-embedding-provider)))
+  (let* ((provider-keyword (or provider-keyword
+                               (claw-lisp.config:current-embedding-provider)))
          (provider (resolve-embedding-provider provider-keyword))
          (models-fn (getf provider :models-fn)))
     (when models-fn

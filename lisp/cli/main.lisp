@@ -608,7 +608,7 @@ observability records, are intentionally dropped in runner v0."
                          "anthropic"))
            (model (or (%plist-string request :model)
                       (getf options :model)
-                      "claude-sonnet"))
+                      "claude-sonnet-4-6"))
            (cwd (or (%plist-string request :cwd)
                     (getf options :project-root)
                     (uiop:getcwd)))
@@ -768,7 +768,7 @@ observability records, are intentionally dropped in runner v0."
              22))))
       (t
        (run-cli :provider (or (getf parsed :provider) "anthropic")
-                :model (or (getf parsed :model) "claude-sonnet")
+                :model (or (getf parsed :model) "claude-sonnet-4-6")
                 :project-root (getf parsed :project-root))
        0))))
 
@@ -1361,7 +1361,7 @@ observability records, are intentionally dropped in runner v0."
              ;; User message
              (execute-user-message runtime session trimmed))))))))
 
-(defun make-cli-runtime (&key (provider "anthropic") (model "claude-sonnet") (project-root nil))
+(defun make-cli-runtime (&key (provider "anthropic") (model "claude-sonnet-4-6") (project-root nil))
   "Create a runtime configured for CLI use.
 
    Returns the runtime and initial session as two values."
@@ -1380,11 +1380,11 @@ observability records, are intentionally dropped in runner v0."
                    :session-id (format nil "cli-~A" (get-universal-time))))
     (values runtime session)))
 
-(defun run-cli (&key (provider "anthropic") (model "claude-sonnet") (project-root nil))
+(defun run-cli (&key (provider "anthropic") (model "claude-sonnet-4-6") (project-root nil))
   "Run the Claw Lisp CLI.
 
    PROVIDER is the provider name (default: \"anthropic\").
-   MODEL is the model name (default: \"claude-sonnet\").
+   MODEL is the model name (default: \"claude-sonnet-4-6\").
    PROJECT-ROOT is the project directory for CLAUDE.md discovery."
   (multiple-value-bind (runtime session)
       (make-cli-runtime :provider provider :model model :project-root project-root)

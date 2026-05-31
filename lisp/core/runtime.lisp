@@ -66,6 +66,16 @@
 (defparameter +compaction-failure-limit+ 3
   "Maximum consecutive compaction failures before the baseline circuit opens.")
 
+(defparameter +max-provider-tool-iterations+ 4
+  "Bound the baseline provider tool loop to avoid infinite local retries.")
+
+(defun register-tool (runtime tool)
+  "Register TOOL under its declared name and return RUNTIME."
+  (setf (gethash (claw-lisp.core.protocols:tool-name tool)
+                 (runtime-tool-registry runtime))
+        tool)
+  runtime)
+
 (defun session-transcript-path (runtime session)
   "Return the transcript path for SESSION under RUNTIME configuration."
   (transcript-path-for-session (runtime-settings runtime)
@@ -443,8 +453,6 @@ external dependency is the `timeout` command used by the shell tool."
     (register-provider runtime
                        (claw-lisp.providers.openrouter:make-openrouter-provider
                         config))
-    (register-provider runtime
-                       (claw-lisp.providers.bedrock:make-bedrock-provider))
     runtime))
 
 (defun register-default-tools (runtime)
@@ -475,13 +483,6 @@ external dependency is the `timeout` command used by the shell tool."
     (setf (gethash canonical-name (runtime-provider-registry runtime))
           provider)
     runtime))
-
-(defun register-tool (runtime tool)
-  "Register TOOL under its declared name and return RUNTIME."
-  (setf (gethash (claw-lisp.core.protocols:tool-name tool)
-                 (runtime-tool-registry runtime))
-        tool)
-  runtime)
 
 (defun resolve-tool (runtime tool-name)
   "Return the tool bound to TOOL-NAME or NIL."
@@ -536,6 +537,18 @@ When PROVIDER-NAME is supplied, only models for that provider are returned."
        :provider-default)
       (t :fallback))))
 
+(defun %provider-default-or-fallback-model-p (provider resolution-source)
+  "Return true when RESOLUTION-SOURCE should be rejected for PROVIDER.
+
+The mock provider is intentionally permissive in tests and local validation.
+Real providers should reject provider-default/fallback model guesses before
+credential checks so users see the model error they actually made."
+  (and provider
+       (member resolution-source '(:provider-default :fallback) :test #'eq)
+       (not (string= (%normalize-provider-name
+                      (claw-lisp.core.protocols:provider-name provider))
+                     "mock"))))
+
 (defun call-with-session-flag (session flag busy-error-message thunk)
   "Run THUNK with SESSION FLAG set, always clearing FLAG in unwind-protect."
   (when (session-state-value session flag)
@@ -565,21 +578,25 @@ Set ALLOW-INCOMPATIBLE-MODEL-P to bypass this validation explicitly."
                      (old-model (claw-lisp.core.domain:agent-session-model session))
                      (old-profile (session-state-value session :profile nil))
                      (effective-provider (or (%normalize-provider-name provider-name)
-                                            (%normalize-provider-name old-provider)))
+                                             (%normalize-provider-name old-provider)))
                      (effective-model (or model old-model))
                      (effective-profile (or profile old-profile))
-                     (provider-error (and effective-provider
-                                          (check-provider-configuration runtime effective-provider)))
                      (provider-keyword (%provider-name->keyword effective-provider))
                      (registry (runtime-model-registry runtime))
                      (resolved-caps (claw-lisp.core.model-registry:resolve-model
                                      registry effective-model))
                      (warnings nil))
-                (when provider-error
-                  (error "~A" provider-error))
                 (when (or (null effective-model) (zerop (length effective-model)))
                   (error "Model cannot be empty."))
-                (let ((resolution-source (%model-resolution-source runtime effective-model)))
+                (let* ((resolved-provider (and effective-provider
+                                              (resolve-provider runtime effective-provider)))
+                       (resolution-source (%model-resolution-source runtime effective-model))
+                       (provider-error (and effective-provider
+                                            (check-provider-configuration runtime effective-provider))))
+                  (when (%provider-default-or-fallback-model-p resolved-provider resolution-source)
+                    (error "Unknown model: ~A" effective-model))
+                  (when provider-error
+                    (error "~A" provider-error))
                   ;; For known model matches, enforce provider/model compatibility by default.
                   (when (and (member resolution-source '(:exact :alias :prefix) :test #'eq)
                              provider-keyword
@@ -596,8 +613,7 @@ Set ALLOW-INCOMPATIBLE-MODEL-P to bypass this validation explicitly."
                          "Model ~A resolves to provider ~A, which is incompatible with selected provider ~A. Set :allow-incompatible-model-p t to override."
                          effective-model
                          (claw-lisp.core.domain:model-capabilities-provider resolved-caps)
-                         effective-provider))))
-                (let ((resolution-source (%model-resolution-source runtime effective-model)))
+                         effective-provider)))
                   (when (member resolution-source '(:provider-default :fallback) :test #'eq)
                     (push (format nil "Model ~A resolved via ~A capabilities; verify provider support."
                                   effective-model resolution-source)
@@ -646,9 +662,6 @@ takes precedence over this generated ID."
   (format nil "~A-call-~D"
           tool-name
           (1+ (length (claw-lisp.core.domain:conversation-tool-results conversation)))))
-
-(defparameter +max-provider-tool-iterations+ 4
-  "Bound the baseline provider tool loop to avoid infinite local retries.")
 
 (defun provider-tool-descriptors (runtime)
   "Return a full tool descriptor list for provider tool-call requests.
@@ -1489,7 +1502,7 @@ later phases."
                  :stale_p
                  (claw-lisp.storage.session-memory:session-memory-metadata-stale-p
                   metadata)))
-          t)
+          t))
     (error (condition)
       (warn "Session memory update failed for session ~A: ~A"
             (claw-lisp.core.domain:agent-session-id session)
@@ -1603,4 +1616,5 @@ later phases."
                                     (* 100 (context-status-usage-ratio post-status)))
                    :status-code 413)))
         ;; Retry exactly once
-        (when retry-thunk (funcall retry-thunk))))))
+        (when retry-thunk
+          (funcall retry-thunk)))))

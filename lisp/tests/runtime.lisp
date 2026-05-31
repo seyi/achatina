@@ -4198,6 +4198,24 @@
                         (claw-lisp.core.domain:agent-session-model session))
                "Expected model update despite fallback warning"))))
 
+(defun test-phase9-select-session-model-rejects-unknown-real-provider-model-before-credentials ()
+  (let ((runtime (make-runtime)))
+    (register-default-providers runtime)
+    (let ((session (start-session runtime
+                                  :provider-name "mock"
+                                  :model "mock-model"
+                                  :session-id "phase9-select-real-provider-unknown-model")))
+      (handler-case
+          (progn
+            (claw-lisp.core.runtime:select-session-model
+             runtime session
+             :provider-name "anthropic"
+             :model "missing-model")
+            (%assert nil "Expected unknown-model rejection for real provider"))
+        (error (condition)
+          (%assert (search "Unknown model: missing-model" (princ-to-string condition))
+                   "Expected unknown-model error, got ~A" condition))))))
+
 (defun test-phase9-select-session-model-preserves-input-model-id-for-alias-and-prefix ()
   (let ((runtime (make-runtime)))
     (register-default-providers runtime)
@@ -4389,7 +4407,18 @@
         (%assert (search "Model switch failed: Session is busy." busy-model-output)
                  "Expected friendly busy output for :model, got ~S" busy-model-output)
         (%assert (search "Selection failed: Session is busy." busy-use-output)
-                 "Expected friendly busy output for :use, got ~S" busy-use-output)))))
+                 "Expected friendly busy output for :use, got ~S" busy-use-output)))
+      (let* ((session-real (start-session runtime
+                                          :provider-name "anthropic"
+                                          :model "claude-sonnet-4-6"
+                                          :session-id "phase9-cli-provider-model-real"))
+             (bad-real-model-output (with-output-to-string (*standard-output*)
+                                      (claw-lisp.cli::handle-command
+                                       runtime session-real ":model missing-model"))))
+        (%assert (search "Model switch failed: Unknown model: missing-model"
+                         bad-real-model-output)
+                 "Expected unknown-model output from :model on a real provider, got ~S"
+                 bad-real-model-output))))
 
 (defun test-phase9-cli-transcript-dispatch-neighbor-commands ()
   (let ((runtime (make-runtime)))

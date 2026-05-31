@@ -24,7 +24,8 @@ a static list or fetched from the API."
 
 (defun %openai-stub-embedding-dimension ()
   "Return the embedding dimension to use for the stub implementation."
-  (or (runtime-config-embedding-default-dimension *runtime-config*)
+(or (claw-lisp.config:runtime-config-embedding-default-dimension
+     claw-lisp.config:*runtime-config*)
       *openai-default-embedding-dimension*))
 
 (defun %hash-string-to-floats (text dimension)
@@ -61,7 +62,8 @@ BEHAVIOR:
 ERRORS:
   - Signals EMBEDDING-ERROR if MODEL is not in OPENAI-SUPPORTED-EMBEDDING-MODELS."
   (declare (ignore timeout-seconds))
-  (let ((model (or model (runtime-config-embedding-model *runtime-config*))))
+  (let ((model (or model (claw-lisp.config:runtime-config-embedding-model
+                          claw-lisp.config:*runtime-config*))))
     (unless (member model (openai-supported-embedding-models) :test #'string=)
       (error 'embedding-error
              :provider :openai

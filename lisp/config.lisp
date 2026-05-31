@@ -160,7 +160,7 @@
   (cas-ref-root ".claw-lisp/cas/refs/" :type string)
   (tool-result-dedup-p t :type boolean)
   (default-provider "anthropic" :type string)
-  (default-model "claude-sonnet" :type string)
+  (default-model "claude-sonnet-4-6" :type string)
   (tool-preview-bytes 2048 :type integer)
   (tool-result-aggregate-budget-bytes 8192 :type integer)
   (tool-allowed-roots nil :type list)

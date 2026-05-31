@@ -87,8 +87,8 @@
 
 (defun test-proactive-warning-emitted ()
   "Warning callback is invoked when action is not :none"
-  (let ((warning-received nil)
-        (cb (lambda (text) (setf warning-received text))))
+  (let* ((warning-received nil)
+         (cb (lambda (text) (setf warning-received text))))
     ;; Verify callback signature matches plan
     (%assert (functionp cb)
              "Expected callback to be a function")
