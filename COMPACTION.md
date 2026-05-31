@@ -107,9 +107,6 @@ In the public repo, this matters for:
 - compaction-boundary visibility
 - deterministic rendering of the reduced context story
 
-The public repo exposes the local artifact side of this design. It does not
-claim to expose private distributed execution or control-plane behavior.
-
 ## Why This Is Still Public
 
 The public repo intentionally includes:
@@ -127,16 +124,9 @@ They make the project more attractive to systems developers evaluating:
 - artifact-backed runtime transitions
 - practical context-management strategies in local agents
 
-## Boundary
+## Scope
 
-This document describes **local runtime compaction architecture**.
-
-It does **not** imply that the public repo contains:
-
-- distributed compaction coordination
-- cluster-wide scheduling
-- managed control-plane execution
-- Dagens integration internals
-- enterprise HA or replay orchestration
+This document describes **local runtime compaction architecture** as it exists
+in this repository.
 
 Those remain outside the public `achatina` repo boundary.

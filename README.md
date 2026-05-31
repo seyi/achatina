@@ -31,16 +31,13 @@ storage so that execution history is inspectable and reproducible.
 
 ## Current Scope
 
-This public release is focused on:
+The current repository includes:
 
 - the Common Lisp runtime
 - the IR pipeline
 - execution-plan generation
 - local execution
 - artifact and provenance handling
-
-It does not claim to ship a full distributed orchestration platform or a
-managed control plane.
 
 ## Why IR Matters
 
@@ -58,14 +55,12 @@ without turning each frontend into its own runtime:
 This repository is source-available and intended to be runnable, inspectable,
 and useful for evaluation and learning.
 
-Current public emphasis:
+Current emphasis:
 
 - local runtime proof
 - IR/CAS architecture
 - execution-plan contract
 - local context-management and compaction architecture
-
-Future backend and orchestration depth may exist outside this public repo.
 
 ## Quick Start
 

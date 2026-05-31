@@ -49,9 +49,6 @@ the repository can lower and reason about explicitly.
 
 The local runtime executes the current supported subset directly.
 
-This public surface is intentionally centered on the local execution path rather
-than distributed orchestration.
-
 ## CAS-Backed Artifacts
 
 Achatina can materialize staged artifacts into content-addressed storage.
@@ -95,14 +92,11 @@ See:
 
 - `COMPACTION.md`
 
-## Public Scope Boundary
+## Repository Scope
 
-This public release is centered on:
+The current repository centers on:
 
 - IR
 - execution-plan lowering
 - artifact/provenance handling
 - local execution
-
-It does not attempt to include the full operational depth of private backend or
-control-plane integrations.

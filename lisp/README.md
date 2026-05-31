@@ -101,13 +101,10 @@ Local runtime state is written under `.claw-lisp/`, including:
 
 These are local runtime byproducts, not part of the committed source tree.
 
-## Scope Boundary
+## Scope
 
-This public directory is focused on:
+This directory is focused on:
 
 - local execution
 - IR and execution-plan semantics
 - artifact persistence and provenance
-
-It does not claim to expose the full private backend or distributed execution
-depth that may exist outside the public repo.
