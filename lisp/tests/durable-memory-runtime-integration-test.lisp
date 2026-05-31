@@ -105,31 +105,6 @@
   (format t "~%✓ :augmented pass disabled test passed~%")
   t)
 
-(defun test-turn-memory-injected-p-tracking ()
-  "Test that turn-memory-injected-p and mark-turn-memory-injected work together.
-   
-   This verifies the dedup tracking mechanism."
-  (let ((turn (%create-test-turn)))
-    ;; Initially should not be injected
-    (%assert (not (claw-lisp.storage.durable-memory-search::turn-memory-injected-p
-                   turn :initial))
-             "Turn should not be marked as injected initially")
-    
-    ;; Mark as injected
-    (claw-lisp.storage.durable-memory-search::mark-turn-memory-injected turn :initial)
-    
-    ;; Now should be injected
-    (%assert (claw-lisp.storage.durable-memory-search::turn-memory-injected-p
-                turn :initial)
-             "Turn should be marked as injected after marking")
-    
-    ;; Public build uses a single injection marker contract.
-    (%assert (claw-lisp.storage.durable-memory-search::turn-memory-injected-p
-              turn :augmented)
-             "Public build should treat augmented lookups as covered by the single injection marker"))
-  (format t "~%✓ turn-memory-injected-p tracking test passed~%")
-  t)
-
 (defun test-extract-query-text-from-turn ()
   "Test that extract-query-text correctly extracts content from turn.
    
@@ -314,7 +289,6 @@
                   (test-inject-durable-memory-context-with-enabled-config)
                   (test-inject-durable-memory-context-augmented-pass-disabled)
                   ;; Helper function tests
-                  (test-turn-memory-injected-p-tracking)
                   (test-extract-query-text-from-turn)
                   (test-summarize-tool-results-empty)
                   ;; Struct tests

@@ -2194,24 +2194,10 @@
                     :saved_count 1))
              (execute-registered-tool runtime session "echo" '(:text "ABCDEFGHIJKLMN"))
              (execute-registered-tool runtime session "echo" '(:text "123456789ABCDE"))
-             (let* ((handle (claw-lisp.core.runtime:spawn-child-agent
-                             runtime session
-                             :provider-name "mock"
-                             :model "mock-model"
-                             :initial-user-message "child hello"))
-                    (child-id (claw-lisp.core.domain:child-agent-handle-child-id handle))
-                    (summary (claw-lisp.core.runtime:await-child-agent runtime session child-id
-                                                                        :timeout-seconds 5)))
-               (%assert (eq :completed (getf summary :status))
-                        "Expected completed child summary, got ~S" summary))
              (%assert (member "durable_memory_extract" events :test #'string=)
                       "Expected callback to observe durable_memory_extract, got ~S" events)
              (%assert (member "microcompact" events :test #'string=)
-                      "Expected callback to observe microcompact, got ~S" events)
-             (%assert (member "child_spawned" events :test #'string=)
-                      "Expected callback to observe child_spawned, got ~S" events)
-             (%assert (member "child_finished" events :test #'string=)
-                      "Expected callback to observe child_finished, got ~S" events)))
+                      "Expected callback to observe microcompact, got ~S" events)))
       (when (probe-file root)
         (uiop:delete-directory-tree root :validate t)))))
 
@@ -3061,256 +3047,106 @@
                "Expected successful response"))))
 
 (defun test-phase8-child-progress-and-transcript-linking ()
-  (let* ((root (merge-pathnames
-                (format nil "claw-lisp-phase8-progress-test-~A/" (get-universal-time))
-                #P"/tmp/"))
-         (transcripts-root (merge-pathnames "transcripts/" root))
-         (config (claw-lisp.config::%make-runtime-config
-                  :data-root (namestring root)
-                  :transcripts-root (namestring transcripts-root)
-                  :artifacts-root (namestring (merge-pathnames "artifacts/" root))
-                  :memory-root (namestring (merge-pathnames "memory/" root))
-                  :default-provider "mock"
-                  :default-model "mock-model"))
-         (runtime (make-runtime :config config)))
-    (unwind-protect
-         (progn
-           (register-default-providers runtime)
-           (let* ((session (start-session runtime
-                                          :provider-name "mock"
-                                          :model "mock-model"
-                                          :session-id "phase8-progress-parent"))
-                  (handle (claw-lisp.core.runtime:spawn-child-agent
+  (labels ((capture-error (thunk)
+             (handler-case
+                 (progn
+                   (funcall thunk)
+                   nil)
+               (error (condition)
+                 condition))))
+    (let ((runtime (make-runtime)))
+      (register-default-providers runtime)
+      (let ((session (start-session runtime
+                                    :provider-name "mock"
+                                    :model "mock-model"
+                                    :session-id "phase8-progress-parent")))
+        (dolist (condition
+                 (list (capture-error
+                        (lambda ()
+                          (claw-lisp.core.runtime:spawn-child-agent
                            runtime session
                            :provider-name "mock"
                            :model "mock-model"
-                           :initial-user-message "child hello"))
-                  (child-id (claw-lisp.core.domain:child-agent-handle-child-id handle))
-                  (snapshot (claw-lisp.core.runtime:child-progress-snapshot runtime session child-id))
-                  (all-snapshots (claw-lisp.core.runtime:list-child-progress-snapshots runtime session))
-                  (summary (claw-lisp.core.runtime:await-child-agent runtime session child-id :timeout-seconds 5))
-                  (final-snapshot (claw-lisp.core.runtime:child-progress-snapshot runtime session child-id))
-                  (lines (read-lines (claw-lisp.core.runtime:session-transcript-path runtime session))))
-             (%assert snapshot "Expected immediate child progress snapshot")
-             (%assert (typep snapshot 'claw-lisp.core.domain:child-progress-snapshot)
-                      "Expected child-progress-snapshot type, got ~S" snapshot)
-             (%assert (>= (length all-snapshots) 1)
-                      "Expected at least one snapshot, got ~A" (length all-snapshots))
-             (%assert (find child-id all-snapshots
-                            :key #'claw-lisp.core.domain:child-progress-snapshot-child-id
-                            :test #'string=)
-                      "Expected child ~A in snapshot list" child-id)
-             (%assert (eq :completed (getf summary :status))
-                      "Expected completed child summary, got ~S" summary)
-             (%assert final-snapshot "Expected final snapshot after await")
-             (%assert (eq :completed (claw-lisp.core.domain:child-progress-snapshot-status final-snapshot))
-                      "Expected completed final snapshot, got ~S" final-snapshot)
-             (%assert (find "\"event\":\"child_spawned\"" lines :test #'search)
-                      "Expected child_spawned transcript event, got ~S" lines)
-             (%assert (find "\"event\":\"child_finished\"" lines :test #'search)
-                      "Expected child_finished transcript event, got ~S" lines)
-             (%assert (find "\"child_transcript_path\":" lines :test #'search)
-                      "Expected child transcript path linkage in transcript events, got ~S" lines)))
-      (when (probe-file root)
-        (uiop:delete-directory-tree root :validate t)))))
+                           :initial-user-message "child hello")))
+                       (capture-error
+                        (lambda ()
+                          (claw-lisp.core.runtime:child-progress-snapshot
+                           runtime session "missing-child")))
+                       (capture-error
+                        (lambda ()
+                          (claw-lisp.core.runtime:list-child-progress-snapshots runtime session)))
+                       (capture-error
+                        (lambda ()
+                          (claw-lisp.core.runtime:list-child-agents runtime session)))))
+          (%assert condition
+                   "Expected child-agent public-build error")
+          (%assert (search "Child-agent orchestration is not included in the public Achatina build"
+                           (princ-to-string condition))
+                   "Expected public-build child-agent message, got ~S" condition))))))
 
 (defun test-phase8-cli-agent-visibility-commands ()
-  (let* ((root (merge-pathnames
-                (format nil "claw-lisp-phase8-cli-visibility-test-~A/" (get-universal-time))
-                #P"/tmp/"))
-         (transcripts-root (merge-pathnames "transcripts/" root))
-         (config (claw-lisp.config::%make-runtime-config
-                  :data-root (namestring root)
-                  :transcripts-root (namestring transcripts-root)
-                  :artifacts-root (namestring (merge-pathnames "artifacts/" root))
-                  :memory-root (namestring (merge-pathnames "memory/" root))
-                  :default-provider "mock"
-                  :default-model "mock-model"))
-         (runtime (make-runtime :config config)))
-    (unwind-protect
-        (progn
-          (register-default-providers runtime)
-          (let* ((session (start-session runtime
-                                         :provider-name "mock"
-                                         :model "mock-model"
-                                         :session-id "phase8-cli-parent"))
-                 (empty-output
-                   (with-output-to-string (*standard-output*)
-                     (claw-lisp.cli::handle-command runtime session ":agents")))
-                 (empty-memory-output
-                   (with-output-to-string (*standard-output*)
-                     (claw-lisp.cli::handle-command runtime session ":memory")))
-                 (empty-memory-content-output
-                   (with-output-to-string (*standard-output*)
-                     (claw-lisp.cli::handle-command runtime session ":memory-content")))
-                 (empty-compaction-output
-                   (with-output-to-string (*standard-output*)
-                     (claw-lisp.cli::handle-command runtime session ":compaction")))
-                 (empty-tasks-output
-                   (with-output-to-string (*standard-output*)
-                     (claw-lisp.cli::handle-command runtime session ":tasks")))
-                 (handle (claw-lisp.core.runtime:spawn-child-agent
-                          runtime session
-                          :provider-name "mock"
-                          :model "mock-model"
-                          :initial-user-message "child hello"))
-                 (child-id (claw-lisp.core.domain:child-agent-handle-child-id handle)))
-            (claw-lisp.core.runtime:await-child-agent runtime session child-id :timeout-seconds 5)
-            (let ((agents-output
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command runtime session ":agents")))
-                  (tasks-output
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command runtime session ":tasks")))
-                  (agent-output
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command
-                       runtime session (format nil ":agent ~A" child-id))))
-                  (usage-output-no-arg
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command runtime session ":agent")))
-                  (usage-output-space
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command runtime session ":agent ")))
-                  (missing-output
-                    (with-output-to-string (*standard-output*)
-                      (claw-lisp.cli::handle-command runtime session ":agent does-not-exist"))))
-              (%assert (search "No child agents tracked yet." empty-output)
-                       "Expected empty-state output for :agents, got ~S" empty-output)
-              (%assert (search "Session memory status:" empty-memory-output)
-                       "Expected memory heading in :memory output, got ~S" empty-memory-output)
-              (%assert (search "Exists:" empty-memory-output)
-                       "Expected existence status in :memory output, got ~S" empty-memory-output)
-              (%assert (or (search "No session memory file yet." empty-memory-content-output)
-                           (search "Session memory at:" empty-memory-content-output))
-                       "Expected :memory-content output shape, got ~S" empty-memory-content-output)
-              (%assert (search "Compaction status:" empty-compaction-output)
-                       "Expected compaction heading in :compaction output, got ~S" empty-compaction-output)
-              (%assert (search "Failure count:" empty-compaction-output)
-                       "Expected compaction failure count in :compaction output, got ~S" empty-compaction-output)
-              (%assert (search "No background tasks right now." empty-tasks-output)
-                       "Expected empty-state output for :tasks, got ~S" empty-tasks-output)
-              (submit-user-message runtime session "memory status test message")
-              (claw-lisp.core.runtime:maybe-append-transcript-event
-               session
-               (claw-lisp.core.runtime:session-transcript-path runtime session)
-               (list :event "compaction_boundary"
-                     :session_id (claw-lisp.core.domain:agent-session-id session)
-                     :source :local
-                     :preserved_count 1
-                     :restored_tool_results_count 0))
-              (let ((memory-output
-                      (with-output-to-string (*standard-output*)
-                        (claw-lisp.cli::handle-command runtime session ":memory")))
-                    (memory-content-output
-                      (with-output-to-string (*standard-output*)
-                        (claw-lisp.cli::handle-command runtime session ":memory-content")))
-                    (compaction-output
-                      (with-output-to-string (*standard-output*)
-                        (claw-lisp.cli::handle-command runtime session ":compaction"))))
-                (%assert (search "Exists: yes" memory-output)
-                         "Expected present-state output for :memory, got ~S" memory-output)
-                (%assert (search "Size bytes:" memory-output)
-                         "Expected file-size output for :memory, got ~S" memory-output)
-                (%assert (search "Last write (unix-seconds):" memory-output)
-                         "Expected write-date output for :memory, got ~S" memory-output)
-                (%assert (search "Session memory at:" memory-content-output)
-                         "Expected path heading for :memory-content, got ~S" memory-content-output)
-                (%assert (search "memory status test message" memory-content-output)
-                         "Expected session content in :memory-content, got ~S" memory-content-output)
-                (%assert (search "Compaction needed:" compaction-output)
-                         "Expected compaction-needed field in :compaction output, got ~S" compaction-output)
-                (%assert (search "Circuit open:" compaction-output)
-                         "Expected circuit-open field in :compaction output, got ~S" compaction-output)
-                (%assert (search "\"event\":\"compaction_boundary\"" compaction-output)
-                         "Expected compaction event visibility in :compaction output, got ~S"
-                         compaction-output))
-              (%assert (search "Child agents:" agents-output)
-                       "Expected :agents heading, got ~S" agents-output)
-              (%assert (search "Background tasks:" tasks-output)
-                       "Expected :tasks heading, got ~S" tasks-output)
-              (%assert (search "[completed]" tasks-output)
-                       "Expected :tasks status bucket output, got ~S" tasks-output)
-              (%assert (not (search "  - [completed]   - " tasks-output))
-                       "Expected cleaned :tasks formatting without double bullet, got ~S" tasks-output)
-              (%assert (string= "active" (claw-lisp.cli::%background-status-bucket :running))
-                       "Expected :running -> active bucket")
-              (%assert (string= "ended" (claw-lisp.cli::%background-status-bucket :failed))
-                       "Expected :failed -> ended bucket")
-              (%assert (string= "other" (claw-lisp.cli::%background-status-bucket :paused))
-                       "Expected unknown status -> other bucket")
-              (%assert (search child-id agents-output)
-                       "Expected child id in :agents output, got ~S" agents-output)
-              (%assert (search "status=" agents-output)
-                       "Expected status field in :agents output, got ~S" agents-output)
-              (%assert (search "Child:" agent-output)
-                       "Expected :agent child heading, got ~S" agent-output)
-              (%assert (search "Transcript:" agent-output)
-                       "Expected :agent transcript path output, got ~S" agent-output)
-              (%assert (search "Usage: :agent <child-id>" usage-output-no-arg)
-                       "Expected usage output for :agent, got ~S" usage-output-no-arg)
-              (%assert (search "Usage: :agent <child-id>" usage-output-space)
-                       "Expected usage output for :agent <space>, got ~S" usage-output-space)
-              (%assert (search "No child agent found:" missing-output)
-                       "Expected missing child message, got ~S" missing-output))))
-      (when (probe-file root)
-        (uiop:delete-directory-tree root :validate t)))))
+  (let ((runtime (make-runtime)))
+    (register-default-providers runtime)
+    (let* ((session (start-session runtime
+                                   :provider-name "mock"
+                                   :model "mock-model"
+                                   :session-id "phase8-cli-parent"))
+           (agents-output
+             (with-output-to-string (*standard-output*)
+               (claw-lisp.cli::handle-command runtime session ":agents")))
+           (memory-output
+             (with-output-to-string (*standard-output*)
+               (claw-lisp.cli::handle-command runtime session ":memory")))
+           (memory-content-output
+             (with-output-to-string (*standard-output*)
+               (claw-lisp.cli::handle-command runtime session ":memory-content")))
+           (compaction-output
+             (with-output-to-string (*standard-output*)
+               (claw-lisp.cli::handle-command runtime session ":compaction")))
+           (tasks-output
+             (with-output-to-string (*standard-output*)
+               (claw-lisp.cli::handle-command runtime session ":tasks"))))
+      (%assert (search "Child-agent orchestration commands are not included in the public Achatina build."
+                       agents-output)
+               "Expected public-build notice for :agents, got ~S" agents-output)
+      (%assert (search "Session memory status:" memory-output)
+               "Expected memory heading in :memory output, got ~S" memory-output)
+      (%assert (search "Exists:" memory-output)
+               "Expected existence status in :memory output, got ~S" memory-output)
+      (%assert (or (search "No session memory file yet." memory-content-output)
+                   (search "Session memory at:" memory-content-output))
+               "Expected :memory-content output shape, got ~S" memory-content-output)
+      (%assert (search "Compaction status:" compaction-output)
+               "Expected compaction heading in :compaction output, got ~S" compaction-output)
+      (%assert (search "Failure count:" compaction-output)
+               "Expected compaction failure count in :compaction output, got ~S" compaction-output)
+      (%assert (search "No background tasks right now." tasks-output)
+               "Expected empty-state output for :tasks, got ~S" tasks-output))))
 
 (defun test-phase8-await-timeout-summary ()
-  (let* ((root (merge-pathnames
-                (format nil "claw-lisp-phase8-await-timeout-test-~A/" (get-universal-time))
-                #P"/tmp/"))
-         (transcripts-root (merge-pathnames "transcripts/" root))
-         (config (claw-lisp.config::%make-runtime-config
-                  :data-root (namestring root)
-                  :transcripts-root (namestring transcripts-root)
-                  :artifacts-root (namestring (merge-pathnames "artifacts/" root))
-                  :memory-root (namestring (merge-pathnames "memory/" root))
-                  :default-provider "mock"
-                  :default-model "mock-model"))
-         (runtime (make-runtime :config config))
-         (thread nil))
-    (unwind-protect
-         (progn
-           (register-default-providers runtime)
-           (let* ((session (start-session runtime
-                                          :provider-name "mock"
-                                          :model "mock-model"
-                                          :session-id "phase8-timeout-parent"))
-                  (supervisor (claw-lisp.core.agent-supervisor:ensure-agent-supervisor session))
-                  (child-session (start-session runtime
-                                               :provider-name "mock"
-                                               :model "mock-model"
-                                               :session-id "phase8-timeout-child"))
-                  (child-id "phase8-timeout-child")
-                  (handle (claw-lisp.core.domain:make-child-agent-handle
-                           :child-id child-id
-                           :parent-id (claw-lisp.core.domain:agent-session-id session)
-                           :session child-session
-                           :mailbox (claw-lisp.core.agent-mailbox:make-agent-mailbox
-                                     :mailbox-id "phase8-timeout-child-mailbox"
-                                     :owner-agent-id child-id)
-                           :status :running
-                           :started-universal-time (get-universal-time))))
-             (setf thread (sb-thread:make-thread
-                           (lambda ()
-                             (sleep 1.5))
-                           :name "phase8-timeout-test-child"))
-             (setf (claw-lisp.core.domain:child-agent-handle-thread handle) thread)
-             (claw-lisp.core.agent-supervisor:register-child-handle supervisor handle)
-             (let* ((summary (claw-lisp.core.runtime:await-child-agent
-                              runtime session child-id :timeout-seconds 0.1))
-                    (lines (read-lines (claw-lisp.core.runtime:session-transcript-path runtime session))))
-               (%assert (eq :timeout (getf summary :status))
-                        "Expected :timeout summary status, got ~S" summary)
-               (%assert (find "\"event\":\"child_finished\"" lines :test #'search)
-                        "Expected child_finished transcript event on timeout, got ~S" lines)
-               (%assert (find "\"status\":\"timeout\"" lines :test #'search)
-                        "Expected timeout status in transcript event, got ~S" lines))))
-      (when (and thread (sb-thread:thread-alive-p thread))
-        (ignore-errors (sb-thread:terminate-thread thread)))
-      (when (probe-file root)
-        (uiop:delete-directory-tree root :validate t)))))
+  (labels ((capture-error (thunk)
+             (handler-case
+                 (progn
+                   (funcall thunk)
+                   nil)
+               (error (condition)
+                 condition))))
+    (let ((runtime (make-runtime)))
+      (register-default-providers runtime)
+      (let* ((session (start-session runtime
+                                     :provider-name "mock"
+                                     :model "mock-model"
+                                     :session-id "phase8-timeout-parent"))
+             (await-error
+               (capture-error
+                (lambda ()
+                  (claw-lisp.core.runtime:await-child-agent
+                   runtime session "phase8-timeout-child" :timeout-seconds 0.1)))))
+        (%assert await-error
+                 "Expected public-build await-child-agent error")
+        (%assert (search "Child-agent orchestration is not included in the public Achatina build"
+                         (princ-to-string await-error))
+                 "Expected public-build child-agent message, got ~S" await-error)))))
 
 (defun test-phase8-unknown-child-errors ()
   (labels ((capture-error (thunk)
@@ -3349,24 +3185,27 @@
                                   (lambda ()
                                     (claw-lisp.core.runtime:send-agent-message
                                      runtime session "missing-child" :control (list :ping t))))))
-                 (%assert await-error
-                        "Expected await-child-agent unknown-child error")
+                (%assert await-error
+                        "Expected await-child-agent public-build error")
                  (%assert (typep await-error 'simple-error)
                           "Expected SIMPLE-ERROR for await-child-agent, got ~S" await-error)
-                 (%assert (search "Unknown child agent:" (princ-to-string await-error))
-                          "Expected unknown-child message for await-child-agent, got ~S" await-error)
+                 (%assert (search "Child-agent orchestration is not included in the public Achatina build"
+                                  (princ-to-string await-error))
+                          "Expected public-build message for await-child-agent, got ~S" await-error)
                  (%assert cancel-error
-                        "Expected cancel-child-agent unknown-child error")
+                        "Expected cancel-child-agent public-build error")
                  (%assert (typep cancel-error 'simple-error)
                           "Expected SIMPLE-ERROR for cancel-child-agent, got ~S" cancel-error)
-                 (%assert (search "Unknown child agent:" (princ-to-string cancel-error))
-                          "Expected unknown-child message for cancel-child-agent, got ~S" cancel-error)
+                 (%assert (search "Child-agent orchestration is not included in the public Achatina build"
+                                  (princ-to-string cancel-error))
+                          "Expected public-build message for cancel-child-agent, got ~S" cancel-error)
                  (%assert send-error
-                          "Expected send-agent-message unknown-child error")
+                          "Expected send-agent-message public-build error")
                  (%assert (typep send-error 'simple-error)
                           "Expected SIMPLE-ERROR for send-agent-message, got ~S" send-error)
-                 (%assert (search "Unknown child agent:" (princ-to-string send-error))
-                          "Expected unknown-child message for send-agent-message, got ~S" send-error))))
+                 (%assert (search "Child-agent orchestration is not included in the public Achatina build"
+                                  (princ-to-string send-error))
+                          "Expected public-build message for send-agent-message, got ~S" send-error))))
         (when (probe-file root)
           (uiop:delete-directory-tree root :validate t))))))
 
