@@ -10,20 +10,27 @@ SBCL_BASE = $(SBCL) --noinform --no-userinit --non-interactive \
 	--eval "(declaim (sb-ext:muffle-conditions style-warning sb-ext:compiler-note))" \
 	--eval "(require :asdf)" $(QL_SETUP) \
 	--eval "(push \#P\"$(APP_ROOT)/\" asdf:*central-registry*)"
+LOAD_WITH_KNOWN_WARNING_FILTER = (handler-bind ((sb-kernel:redefinition-with-defgeneric \
+	(lambda (c) \
+	  (declare (ignore c)) \
+	  (let ((restart (find-restart 'muffle-warning))) \
+	    (when restart \
+	      (invoke-restart restart)))))) \
+	%LOAD-FORM%)
 DOCKER_RUN = $(DOCKER) run --rm -v "$(APP_ROOT):/workspace" \
 	-v "$(SBCL_CACHE_VOLUME):/root/.cache/common-lisp" -w /workspace $(IMAGE)
 
 .PHONY: lisp-load
 lisp-load:
-	$(SBCL_BASE) --eval "(asdf:load-system :claw-lisp)"
+	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :claw-lisp),$(LOAD_WITH_KNOWN_WARNING_FILTER))"
 
 .PHONY: lisp-cli
 lisp-cli:
-	$(SBCL_BASE) --eval "(asdf:load-system :claw-lisp-cli)" --eval "(uiop:quit (claw-lisp.cli:main))"
+	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :claw-lisp-cli),$(LOAD_WITH_KNOWN_WARNING_FILTER))" --eval "(uiop:quit (claw-lisp.cli:main))"
 
 .PHONY: lisp-test
 lisp-test:
-	$(SBCL_BASE) --eval "(asdf:load-system :claw-lisp/test)" --eval "(uiop:quit (claw-lisp.tests:run-tests))"
+	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :claw-lisp/test),$(LOAD_WITH_KNOWN_WARNING_FILTER))" --eval "(uiop:quit (claw-lisp.tests:run-tests))"
 
 .PHONY: docker-build
 docker-build:
