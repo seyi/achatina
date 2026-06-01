@@ -2838,7 +2838,7 @@
   (let ((output (with-output-to-string (stream)
                   (%assert (= 0 (claw-lisp.cli::%dispatch-cli '("--help") :stdout stream))
                            "Expected --help dispatch to exit 0"))))
-    (%assert (search "Usage: claw-lisp" output)
+    (%assert (search "Usage: achatina" output)
              "Expected help usage text, got ~S" output)))
 
 (defun test-model-registry-resolve-exact-match ()

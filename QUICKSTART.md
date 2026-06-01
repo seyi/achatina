@@ -244,7 +244,7 @@ The launch surface is intentionally focused on those capabilities.
 1. Build the image with `make docker-build`.
 2. Load the system with `make docker-load`.
 3. Run tests with `make docker-test`.
-4. Start the CLI with `make docker-cli`.
+4. Start the CLI with `make docker-achatina-cli`.
 5. Run `:status`, `:providers`, `:tools`, and `:cas`.
 6. Use `:help` to inspect the wider interactive surface.
 7. Read `ARCHITECTURE.md` for the staged model.
@@ -259,7 +259,7 @@ If Docker requires privilege on your host, rerun the commands with:
 make DOCKER="sudo docker" docker-build
 make DOCKER="sudo docker" docker-load
 make DOCKER="sudo docker" docker-test
-make DOCKER="sudo docker" docker-cli
+make DOCKER="sudo docker" docker-achatina-cli
 ```
 
 ### `docker-load` or `docker-test` fails because the image does not exist
@@ -282,7 +282,7 @@ make docker-test
 Use the minimal runtime check:
 
 ```bash
-make docker-cli
+make docker-achatina-cli
 ```
 
 Then run:
@@ -297,14 +297,14 @@ Then run:
 That is the smallest real post-test interaction that proves the live runtime
 surface is available.
 
-### `docker-cli` starts but a real model message fails immediately
+### `docker-achatina-cli` starts but a real model message fails immediately
 
 Check whether your host shell exported a supported provider key before launching
 the CLI:
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
-make docker-cli
+make docker-achatina-cli
 ```
 
 Then verify inside the CLI:

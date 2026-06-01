@@ -59,19 +59,18 @@ From the repo root:
 - `make docker-build`
 - `make docker-load`
 - `make docker-test`
-- `make docker-cli`
+- `make docker-achatina-cli`
+- compatibility: `make docker-cli`
 
 If Docker requires privilege escalation:
 
 - `make DOCKER="sudo docker" docker-build`
 - `make DOCKER="sudo docker" docker-load`
 - `make DOCKER="sudo docker" docker-test`
-- `make DOCKER="sudo docker" docker-cli`
+- `make DOCKER="sudo docker" docker-achatina-cli`
+- compatibility: `make DOCKER="sudo docker" docker-cli`
 
 ## CLI Notes
-
-The first public release still uses internal `claw-lisp` system and CLI naming
-for continuity.
 
 The CLI supports:
 
@@ -81,7 +80,8 @@ The CLI supports:
 
 From the repo root, the simplest entrypoint is:
 
-- `make docker-cli`
+- `make docker-achatina-cli`
+- compatibility: `make docker-cli`
 
 Then use:
 
