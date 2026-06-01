@@ -1,17 +1,18 @@
 # Achatina
 
-Achatina is an IR-first agent workflow engine with CAS-backed artifacts,
-explicit staged representations, and a locally runnable execution path.
+Achatina is a locally runnable coding-agent runtime built around explicit IR
+stages, inspectable execution plans, and CAS-backed artifacts.
 
-It is designed to compile authored workflows into a validated semantic
-representation, lower them into deterministic execution plans, and execute those
-plans through a local runtime.
+It is designed to turn authored behavior into validated staged
+representations, lower them into deterministic execution plans, and execute
+those plans through a local runtime you can actually inspect.
 
 ## What Achatina Provides
 
+- a locally runnable coding-agent runtime
 - surface-form compilation into semantic IR
 - staged validation and optimization
-- deterministic execution-plan lowering
+- inspectable deterministic execution-plan lowering
 - CAS-backed artifact persistence and provenance
 - local execution of the current public runtime subset
 
@@ -57,9 +58,9 @@ and useful for evaluation and learning.
 
 Current emphasis:
 
-- local runtime proof
-- IR/CAS architecture
-- execution-plan contract
+- coding-agent runtime behavior
+- explicit IR stages and execution plans
+- CAS-backed provenance and artifacts
 - local context-management and compaction architecture
 
 ## Quick Start

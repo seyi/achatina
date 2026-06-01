@@ -220,8 +220,8 @@ Recommendations:
 
 This repository is strongest today as:
 
-- a runnable local runtime
-- an IR and execution-plan implementation
+- a locally runnable coding-agent runtime
+- an explicit IR and execution-plan implementation
 - a CAS-backed artifact/provenance engine
 
 The launch surface is intentionally focused on those capabilities.

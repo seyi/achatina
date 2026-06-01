@@ -2,8 +2,11 @@
 
 ## Overview
 
-Achatina is built around explicit staged representations rather than ad hoc
-runtime mutation.
+Achatina is a locally runnable coding-agent runtime built around explicit IR
+stages, inspectable execution plans, and CAS-backed artifacts.
+
+It is built around explicit staged representations rather than ad hoc runtime
+mutation.
 
 The key idea is:
 

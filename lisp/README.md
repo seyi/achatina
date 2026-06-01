@@ -39,8 +39,8 @@ It is the core of the current public release:
 
 The public repo is strongest today as:
 
-- a locally runnable agent workflow engine
-- an IR-first architecture implementation
+- a locally runnable coding-agent runtime
+- an explicit IR-stage and execution-plan implementation
 - a CAS-backed artifact/provenance implementation
 - a deterministic execution-plan runtime boundary
 
