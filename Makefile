@@ -35,6 +35,10 @@ lisp-load:
 lisp-cli:
 	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :claw-lisp-cli),$(LOAD_WITH_KNOWN_WARNING_FILTER))" --eval "(uiop:quit (claw-lisp.cli:main))"
 
+.PHONY: achatina-cli
+achatina-cli:
+	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :achatina-cli),$(LOAD_WITH_KNOWN_WARNING_FILTER))" --eval "(uiop:quit (claw-lisp.cli:main))"
+
 .PHONY: lisp-test
 lisp-test:
 	$(SBCL_BASE) --eval "$(subst %LOAD-FORM%,(asdf:load-system :claw-lisp/test),$(LOAD_WITH_KNOWN_WARNING_FILTER))" --eval "(uiop:quit (claw-lisp.tests:run-tests))"
@@ -54,6 +58,10 @@ docker-load:
 .PHONY: docker-cli
 docker-cli:
 	$(DOCKER_RUN) make lisp-cli
+
+.PHONY: docker-achatina-cli
+docker-achatina-cli:
+	$(DOCKER_RUN) make achatina-cli
 
 .PHONY: docker-test
 docker-test:

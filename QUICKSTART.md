@@ -52,6 +52,12 @@ make DOCKER="sudo docker" docker-test
 ## Start the CLI
 
 ```bash
+make docker-achatina-cli
+```
+
+Or:
+
+```bash
 make docker-cli
 ```
 
@@ -61,7 +67,10 @@ Or:
 make DOCKER="sudo docker" docker-cli
 ```
 
-This starts the current CLI entrypoint inside the containerized environment.
+The preferred public alias is `make docker-achatina-cli`. The existing
+`make docker-cli` path remains supported during the compatibility transition.
+
+Both start the current CLI entrypoint inside the containerized environment.
 If your host shell already has a supported provider API key exported, the
 Docker CLI path forwards it into the container automatically. Today that covers:
 
@@ -96,7 +105,7 @@ path.
 After that, you can explore the interactive CLI with:
 
 ```bash
-make docker-cli
+make docker-achatina-cli
 ```
 
 and inspect the available commands with:
@@ -111,7 +120,7 @@ After `make docker-test` passes, the smallest real runtime interaction is to
 open the CLI and inspect the live runtime surface:
 
 ```bash
-make docker-cli
+make docker-achatina-cli
 ```
 
 Then run:
@@ -149,7 +158,7 @@ provider key in your host shell first:
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
-make docker-cli
+make docker-achatina-cli
 ```
 
 Then, inside the CLI, enter a normal user message such as:
@@ -193,7 +202,7 @@ Notes:
 
 Once the runtime loads, use this path instead of stopping at inspection:
 
-1. Start the CLI with `make docker-cli`.
+1. Start the CLI with `make docker-achatina-cli`.
 2. Run `:status`, `:providers`, and `:models`.
 3. If you have no API key yet, switch to `mock` with `:provider mock`.
 4. Enter a normal message such as `say hello in one sentence`.
