@@ -129,6 +129,15 @@ What this proves:
 This is a better first runtime check than stopping at `:help`, because it shows
 real runtime inspection commands without requiring API keys or provider setup.
 
+Expected outcome:
+
+- `:status` should show the current provider/model and zero or more messages
+- `:providers` should list the public provider set included in this build
+- `:tools` should list the baseline local tools
+- `:cas` should show local CAS object/ref roots under `.claw-lisp/`
+
+If those commands work, the runtime is loaded and the CLI surface is available.
+
 ## Real Provider Check
 
 If you want to try a real model after the no-key validation path, export a
@@ -145,9 +154,67 @@ Then, inside the CLI, enter a normal user message such as:
 say hello in one sentence
 ```
 
+Expected outcome with a valid key:
+
+- the CLI prints `[Thinking...`
+- the provider returns a short assistant response
+
+Expected outcome without a key:
+
+- the CLI should fail clearly with a message such as:
+
+```text
+Anthropic provider registered, but credentials are not configured.
+```
+
 The same passthrough pattern also works for `OPENAI_API_KEY`,
 `OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` when those providers are
 configured locally.
+
+## Supported Providers In This Build
+
+The current public build is focused on:
+
+- `anthropic`
+- `openrouter`
+- `mock`
+
+Notes:
+
+- `mock` is the safest no-network provider for first local runtime checks
+- real-provider success depends on valid API credentials in the host shell
+- Bedrock is intentionally not included in the current public build
+
+## First Productive Task
+
+Once the runtime loads, use this path instead of stopping at inspection:
+
+1. Start the CLI with `make docker-cli`.
+2. Run `:status`, `:providers`, and `:models`.
+3. If you have no API key yet, switch to `mock` with `:provider mock`.
+4. Enter a normal message such as `say hello in one sentence`.
+5. If you do have an API key, stay on `anthropic` and try the same prompt.
+
+Why this path is useful:
+
+- it proves the CLI handles both command mode and user-turn mode
+- it gives one successful no-network path with `mock`
+- it gives one clear success/failure path for real provider setup
+
+## Provider And Model Naming
+
+The CLI accepts both canonical model names and some short aliases.
+
+Examples:
+
+- canonical: `claude-sonnet-4-6`
+- alias: `claude-sonnet`
+
+Recommendations:
+
+- use `:models` to see known canonical names for the current provider
+- prefer canonical names in bug reports and examples
+- if provider/model selection fails, check provider compatibility before assuming credentials are wrong
 
 ## Current Reality
 
@@ -216,3 +283,27 @@ Then run:
 
 That is the smallest real post-test interaction that proves the live runtime
 surface is available.
+
+### `docker-cli` starts but a real model message fails immediately
+
+Check whether your host shell exported a supported provider key before launching
+the CLI:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+make docker-cli
+```
+
+Then verify inside the CLI:
+
+```text
+:status
+:providers
+:models
+```
+
+If you want a no-network success path first, switch to:
+
+```text
+:provider mock
+```
