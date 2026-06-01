@@ -57,6 +57,41 @@
          :provider "openrouter"
          :tool-calls (extract-openrouter-tool-calls body)))))
 
+(defmethod stream-turn ((provider openrouter-provider) conversation
+                        &key model tools on-event system)
+  "Fallback streaming implementation for OpenRouter.
+
+   The public runtime currently uses the streaming provider path. OpenRouter
+   does not yet expose a native streaming implementation here, so fall back to
+   SEND-TURN and emit a minimal callback sequence when assistant text is
+   available."
+  (declare (ignore system))
+  (let ((response (send-turn provider conversation :model model :tools tools)))
+    (when (and on-event
+               (functionp on-event)
+               (claw-lisp.core.domain:transport-response-ok-p response))
+      (let ((assistant-text (claw-lisp.core.domain:transport-response-assistant-text response)))
+        (handler-case
+            (progn
+              (funcall on-event "message_start"
+                       '(:type "message_start" :message (:id "msg_openrouter_fallback"
+                                                      :model "openrouter")))
+              (when (and (stringp assistant-text)
+                         (> (length assistant-text) 0))
+                (funcall on-event "content_block_start"
+                         '(:type "content_block_start" :content_block (:type "text")))
+                (funcall on-event "content_block_delta"
+                         (list :type "content_block_delta"
+                               :delta (list :type "text_delta"
+                                            :text assistant-text))))
+              (funcall on-event "message_stop"
+                       '(:type "message_stop")))
+          (error (e)
+            (format *error-output*
+                    "Warning: openrouter on-event callback error: ~A~%"
+                    e)))))
+    response))
+
 (defmethod normalize-response ((provider openrouter-provider) response)
   (declare (ignore provider))
   response)

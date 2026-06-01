@@ -92,6 +92,45 @@
       (%assert (string= "file-read" (getf (second calls) :name)) "Expected second call name")
       (%assert (string= "/tmp/foo.txt" (getf (getf (second calls) :input) :path)) "Expected second call input path"))))
 
+(defun test-openrouter-stream-turn-falls-back-to-send-turn ()
+  (let* ((provider (make-instance 'claw-lisp.providers.openrouter::openrouter-provider
+                                  :name "openrouter"
+                                  :credentials nil))
+         (conversation (claw-lisp.core.domain:make-conversation
+                        :id "test-openrouter-stream-fallback"
+                        :messages (list (claw-lisp.core.domain:make-message
+                                         :role :user
+                                         :content "Hello"))))
+         (events-received nil))
+    (%with-redefined-function
+        ('claw-lisp.core.protocols:send-turn
+         (lambda (provider conversation &key model tools system)
+           (declare (ignore provider conversation model tools system))
+           (claw-lisp.core.domain:make-transport-response
+            :ok-p t
+            :status 200
+            :assistant-text "Hello from OpenRouter fallback."
+            :raw-response "{}"
+            :provider "openrouter"
+            :tool-calls nil)))
+      (let ((response (claw-lisp.core.protocols:stream-turn
+                       provider conversation
+                       :model "openrouter/test-model"
+                       :tools nil
+                       :on-event (lambda (event-type data)
+                                   (push (list event-type data) events-received)))))
+        (%assert (claw-lisp.core.domain:transport-response-ok-p response)
+                 "Expected fallback stream response to succeed")
+        (%assert (string= "Hello from OpenRouter fallback."
+                          (claw-lisp.core.domain:transport-response-assistant-text response))
+                 "Expected fallback response text")
+        (%assert (find "message_start" events-received :key #'car :test #'string=)
+                 "Expected message_start event")
+        (%assert (find "content_block_delta" events-received :key #'car :test #'string=)
+                 "Expected content_block_delta event")
+        (%assert (find "message_stop" events-received :key #'car :test #'string=)
+                 "Expected message_stop event")))))
+
 (defun test-json-decode-error-response ()
   (let ((json "{\"error\":{\"message\":\"Rate limit exceeded\"}}"))
     (let ((text (extract-anthropic-response-text json)))
@@ -123,13 +162,32 @@
                "Missing model in anthropic body: ~A" body)
       (%assert (= 1024 (getf body :max_tokens))
                "Missing max_tokens in anthropic body: ~A" body)
-      ;; The messages field is a plist starting with :role. Check that directly.
       (let ((messages (getf body :messages)))
         (%assert (listp messages) "Messages should be a list, got ~A" messages)
-        (%assert (eq :role (first messages))
-                 "Expected :role as first message key, got ~A" (first messages))
-        (%assert (string= "user" (second messages))
-                 "Expected 'user' as first message value, got ~A" (second messages))))))
+        (%assert (= 1 (length messages))
+                 "Expected one anthropic message entry, got ~A" (length messages))
+        (%assert (string= "user" (getf (first messages) :role))
+                 "Expected 'user' role in first anthropic message, got ~A" (first messages))
+        (%assert (string= "Hello" (getf (first messages) :content))
+                 "Expected first anthropic message content, got ~A" (first messages))))))
+
+(defun test-openrouter-chat-json-single-message-uses-array ()
+  (let ((conversation (make-conversation :id "test-openrouter-chat-json")))
+    (append-message conversation (make-message :role :user :content "Hello"))
+    (let* ((body (conversation->chat-json conversation "moonshotai/kimi-k2.6"))
+           (messages (getf body :messages)))
+      (%assert (string= "moonshotai/kimi-k2.6" (getf body :model))
+               "Missing model in openrouter body: ~A" body)
+      (%assert (listp messages) "Messages should be a list, got ~A" messages)
+      (%assert (= 1 (length messages))
+               "Expected one openrouter message entry, got ~A" (length messages))
+      (%assert (string= "user" (getf (first messages) :role))
+               "Expected 'user' role in first openrouter message, got ~A" (first messages))
+      (%assert (string= "Hello" (getf (first messages) :content))
+               "Expected first openrouter message content, got ~A" (first messages))
+      (%assert (search "\"messages\":[{" (json-encode-string body))
+               "Expected serialized messages array in OpenRouter JSON, got ~A"
+               (json-encode-string body)))))
 
 (defun test-openrouter-response-extraction ()
   (let ((text (extract-openrouter-response-text
@@ -5586,9 +5644,11 @@
   (test-openrouter-no-tool-calls)
   (test-openrouter-empty-tool-calls)
   (test-openrouter-multiple-tool-calls)
+  (test-openrouter-stream-turn-falls-back-to-send-turn)
   (test-json-decode-error-response)
   (test-content-block-roundtrip)
   (test-anthropic-json-format)
+  (test-openrouter-chat-json-single-message-uses-array)
   (test-openrouter-response-extraction)
   (test-anthropic-response-extraction)
   (test-openrouter-error-response-extraction)

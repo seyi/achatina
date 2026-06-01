@@ -2232,7 +2232,8 @@
                 #:count-tokens
                 #:normalize-response
                 #:provider
-                #:send-turn)
+                #:send-turn
+                #:stream-turn)
   (:import-from #:claw-lisp.providers.auth
                 #:credentials-configured-p)
   (:import-from #:claw-lisp.providers.http-utils

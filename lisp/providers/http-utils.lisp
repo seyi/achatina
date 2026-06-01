@@ -138,6 +138,10 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
                                (cons (subseq h 0 pos)
                                      (string-trim '(#\Space) (subseq h (1+ pos))))
                                (cons h "")))))
+         (header-plist
+           (if (assoc "Content-Type" header-plist :test #'string-equal)
+               header-plist
+               (acons "Content-Type" "application/json" header-plist)))
          (json-body (json-encode-string body-plist))
          (response-headers nil))
     (when *http-debug-p*
@@ -152,7 +156,6 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
                       (dexador:post url
                                     :content json-body
                                     :headers header-plist
-                                    :content-type "application/json"
                                     :want-stream nil)
                     (declare (ignore uri stream must-close reason))
                     (setf response-headers headers)
@@ -295,7 +298,7 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->anthropic-block msg))))
-    (let ((body (list*
+    (let ((body (list
                  :model model
                  :max_tokens 1024
                  :messages messages)))
@@ -310,7 +313,7 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->chat-completion-block msg))))
-    (let ((body (list* :model model :messages messages)))
+    (let ((body (list :model model :messages messages)))
       (when tools
         (push (cons :tools tools) body))
       body)))
