@@ -256,32 +256,72 @@
 
 (defun test-default-state-root-family ()
   (let ((config (claw-lisp.config:make-default-runtime-config)))
-    (%assert (string= ".claw-lisp/" (claw-lisp.config:runtime-config-state-root config))
+    (%assert (string= ".achatina/" (claw-lisp.config:runtime-config-state-root config))
              "Unexpected default state root: ~A"
              (claw-lisp.config:runtime-config-state-root config))
-    (%assert (string= ".claw-lisp/" (claw-lisp.config:runtime-config-data-root config))
+    (%assert (string= ".achatina/" (claw-lisp.config:runtime-config-data-root config))
              "Unexpected default data root: ~A"
              (claw-lisp.config:runtime-config-data-root config))
-    (%assert (string= ".claw-lisp/transcripts/"
+    (%assert (string= ".achatina/transcripts/"
                       (claw-lisp.config:runtime-config-transcripts-root config))
              "Unexpected default transcripts root: ~A"
              (claw-lisp.config:runtime-config-transcripts-root config))
-    (%assert (string= ".claw-lisp/artifacts/"
+    (%assert (string= ".achatina/artifacts/"
                       (claw-lisp.config:runtime-config-artifacts-root config))
              "Unexpected default artifacts root: ~A"
              (claw-lisp.config:runtime-config-artifacts-root config))
-    (%assert (string= ".claw-lisp/memory/"
+    (%assert (string= ".achatina/memory/"
                       (claw-lisp.config:runtime-config-memory-root config))
              "Unexpected default memory root: ~A"
              (claw-lisp.config:runtime-config-memory-root config))
-    (%assert (string= ".claw-lisp/cas/objects/"
+    (%assert (string= ".achatina/cas/objects/"
                       (claw-lisp.config:runtime-config-cas-objects-root config))
              "Unexpected default CAS objects root: ~A"
              (claw-lisp.config:runtime-config-cas-objects-root config))
-    (%assert (string= ".claw-lisp/cas/refs/"
+    (%assert (string= ".achatina/cas/refs/"
                       (claw-lisp.config:runtime-config-cas-ref-root config))
              "Unexpected default CAS ref root: ~A"
              (claw-lisp.config:runtime-config-cas-ref-root config))))
+
+(defun test-default-state-root-bootstrap-copies-legacy-tree ()
+  (let* ((temp-root (merge-pathnames
+                     (format nil "achatina-bootstrap-copy-~D-~D/"
+                             (get-universal-time)
+                             (get-internal-real-time))
+                     (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist temp-root)
+           (uiop:with-current-directory (temp-root)
+             (let* ((legacy-transcript #P".claw-lisp/transcripts/bootstrap-session.jsonl")
+                    (legacy-memory #P".claw-lisp/memory/session/bootstrap-session.md")
+                    (bootstrapped-transcript #P".achatina/transcripts/bootstrap-session.jsonl")
+                    (bootstrapped-memory #P".achatina/memory/session/bootstrap-session.md")
+                    (marker-path #P".achatina/.achatina-bootstrap-v1.sexp"))
+               (ensure-directories-exist legacy-transcript)
+               (with-open-file (stream legacy-transcript
+                                       :direction :output
+                                       :if-exists :supersede
+                                       :if-does-not-exist :create)
+                 (write-string "{\"event\":\"session_start\"}" stream))
+               (ensure-directories-exist legacy-memory)
+               (with-open-file (stream legacy-memory
+                                       :direction :output
+                                       :if-exists :supersede
+                                       :if-does-not-exist :create)
+                 (write-string "legacy bootstrap memory" stream))
+               (let ((config (claw-lisp.config:make-default-runtime-config)))
+                 (%assert (probe-file bootstrapped-transcript)
+                          "Expected legacy transcript to be copied into .achatina/")
+                 (%assert (probe-file bootstrapped-memory)
+                          "Expected legacy session memory to be copied into .achatina/")
+                 (%assert (probe-file marker-path)
+                          "Expected bootstrap marker file in .achatina/")
+                 (%assert (string= ".achatina/"
+                                   (claw-lisp.config:runtime-config-state-root config))
+                          "Expected default config to use .achatina/ after bootstrap")))))
+      (when (uiop:directory-exists-p temp-root)
+        (uiop:delete-directory-tree temp-root :validate t)))))
 
 (defun test-state-root-override-derives-family ()
   (let ((config (claw-lisp.config:load-runtime-config
@@ -5864,6 +5904,7 @@
   (test-openrouter-error-response-extraction)
   (test-transcript-path-for-session)
   (test-default-state-root-family)
+  (test-default-state-root-bootstrap-copies-legacy-tree)
   (test-state-root-override-derives-family)
   (test-resume-session-falls-back-to-legacy-transcript-root)
   (test-read-session-memory-text-falls-back-to-legacy-root)

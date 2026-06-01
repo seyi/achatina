@@ -9,9 +9,9 @@ You need:
 - Docker
 - optional: `sudo docker` access on hosts where Docker requires privilege
 
-You may still see `claw-lisp` in internal system names, CLI/runtime output,
-and local state paths such as `.claw-lisp/`. Those names are retained
-implementation identifiers inside Achatina rather than a separate product.
+You may still see `claw-lisp` in some internal system names or compatibility
+entrypoints during the rename transition. The visible local runtime state root
+for this public build is `.achatina/`.
 
 ## Build the Development Image
 
@@ -147,7 +147,7 @@ Expected outcome:
 - `:status` should show the current provider/model and zero or more messages
 - `:providers` should list the public provider set included in this build
 - `:tools` should list the baseline local tools
-- `:cas` should show local CAS object/ref roots under `.claw-lisp/`
+- `:cas` should show local CAS object/ref roots under `.achatina/`
 
 If those commands work, the runtime is loaded and the CLI surface is available.
 

@@ -3,7 +3,7 @@
 ;; --- CLAUDE.md Discovery and Loading ---
 ;;
 ;; Finds and reads CLAUDE.md files from:
-;;   1. User-level: ~/.claw-lisp/CLAUDE.md
+;;   1. User-level: ~/.achatina/CLAUDE.md
 ;;   2. Project-level: $PROJECT_ROOT/CLAUDE.md
 ;;
 ;; Files are concatenated in precedence order (user first, then project).
@@ -11,8 +11,11 @@
 (defvar *claude-md-filename* "CLAUDE.md"
   "The filename used for project-specific instructions.")
 
-(defvar *user-claude-md-subdir* ".claw-lisp"
-  "The subdirectory in the user's home directory for global CLAUDE.md.")
+(defvar *user-claude-md-subdir* ".achatina"
+  "The preferred subdirectory in the user's home directory for global CLAUDE.md.")
+
+(defvar *legacy-user-claude-md-subdir* ".claw-lisp"
+  "Legacy compatibility subdirectory for global CLAUDE.md discovery.")
 
 (defun user-home-dir ()
   "Return the user's home directory as a pathname."
@@ -22,13 +25,15 @@
        (user-homedir-pathname))))
 
 (defun user-claude-md-path ()
-  "Return the path to the user-level CLAUDE.md, or NIL if it doesn't exist."
-  (let ((path (merge-pathnames
-               (make-pathname :directory (list :relative *user-claude-md-subdir*))
-               (user-home-dir))))
-    (let ((full-path (merge-pathnames *claude-md-filename* path)))
-      (when (probe-file full-path)
-        full-path))))
+  "Return the preferred user-level CLAUDE.md path, with legacy fallback."
+  (labels ((candidate-path (subdir)
+             (merge-pathnames
+              *claude-md-filename*
+              (merge-pathnames
+               (make-pathname :directory (list :relative subdir))
+               (user-home-dir)))))
+    (or (probe-file (candidate-path *user-claude-md-subdir*))
+        (probe-file (candidate-path *legacy-user-claude-md-subdir*)))))
 
 (defun project-claude-md-paths (project-root)
   "Return a list of CLAUDE.md paths under PROJECT-ROOT.

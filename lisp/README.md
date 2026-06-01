@@ -91,7 +91,7 @@ for available commands.
 
 ## Artifacts and Local State
 
-Local runtime state is written under `.claw-lisp/`, including:
+Local runtime state is written under `.achatina/`, including:
 
 - transcripts
 - session memory
@@ -100,6 +100,8 @@ Local runtime state is written under `.claw-lisp/`, including:
 - persisted tool-result artifacts
 
 These are local runtime byproducts, not part of the committed source tree.
+Legacy `.claw-lisp/` state is still read for compatibility during the rename
+transition.
 
 ## Scope
 

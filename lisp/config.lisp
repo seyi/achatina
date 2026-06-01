@@ -149,16 +149,25 @@
 ;;; Step 2: Refactor runtime-config
 ;;; ============================================================
 
+(defparameter +default-state-root+ ".achatina/"
+  "Preferred default local state root for the public-facing runtime.")
+
+(defparameter +legacy-default-state-root+ ".claw-lisp/"
+  "Legacy default local state root retained for compatibility reads.")
+
+(defparameter +state-root-bootstrap-marker-name+ ".achatina-bootstrap-v1.sexp"
+  "Marker file written after copying legacy state into the new default root.")
+
 (defstruct (runtime-config
             (:constructor %make-runtime-config))
-  (name "claw-lisp" :type string)
-  (state-root ".claw-lisp/" :type string)
-  (data-root ".claw-lisp/" :type string)
-  (transcripts-root ".claw-lisp/transcripts/" :type string)
-  (artifacts-root ".claw-lisp/artifacts/" :type string)
-  (memory-root ".claw-lisp/memory/" :type string)
-  (cas-objects-root ".claw-lisp/cas/objects/" :type string)
-  (cas-ref-root ".claw-lisp/cas/refs/" :type string)
+  (name "achatina" :type string)
+  (state-root ".achatina/" :type string)
+  (data-root ".achatina/" :type string)
+  (transcripts-root ".achatina/transcripts/" :type string)
+  (artifacts-root ".achatina/artifacts/" :type string)
+  (memory-root ".achatina/memory/" :type string)
+  (cas-objects-root ".achatina/cas/objects/" :type string)
+  (cas-ref-root ".achatina/cas/refs/" :type string)
   (tool-result-dedup-p t :type boolean)
   (default-provider "anthropic" :type string)
   (default-model "claude-sonnet-4-6" :type string)
@@ -261,9 +270,6 @@
   ;; Provider credentials keyed by provider name keyword
   (provider-credentials (make-hash-table :test 'eq) :type hash-table))
 
-(defparameter +legacy-default-state-root+ ".claw-lisp/"
-  "Legacy default local state root retained for compatibility reads.")
-
 (defun %normalize-directory-root (root)
   "Return ROOT as a normalized directory namestring."
   (namestring (uiop:ensure-directory-pathname root)))
@@ -327,6 +333,64 @@ This prevents fallback from interfering with explicit custom per-root overrides.
             (derived-current (%derived-root-for-kind current-state-root kind)))
         (when (string= current-root derived-current)
           (%derived-root-for-kind legacy-state-root kind))))))
+
+(defun %state-root-bootstrap-marker-path (state-root)
+  "Return the bootstrap marker pathname under STATE-ROOT."
+  (merge-pathnames +state-root-bootstrap-marker-name+
+                   (uiop:ensure-directory-pathname state-root)))
+
+(defun %pathname-last-directory-component (pathname)
+  "Return the final directory component for PATHNAME."
+  (let ((directory (pathname-directory (uiop:ensure-directory-pathname pathname))))
+    (car (last directory))))
+
+(defun %copy-directory-tree-contents (source-root destination-root)
+  "Recursively copy SOURCE-ROOT contents into DESTINATION-ROOT."
+  (let ((source-dir (uiop:ensure-directory-pathname source-root))
+        (destination-dir (uiop:ensure-directory-pathname destination-root)))
+    (ensure-directories-exist destination-dir)
+    (dolist (file (uiop:directory-files source-dir))
+      (let ((destination-file (merge-pathnames (file-namestring file) destination-dir)))
+        (ensure-directories-exist destination-file)
+        (uiop:copy-file file destination-file)))
+    (dolist (subdir (uiop:subdirectories source-dir))
+      (let* ((name (%pathname-last-directory-component subdir))
+             (destination-subdir (merge-pathnames (format nil "~A/" name) destination-dir)))
+        (%copy-directory-tree-contents subdir destination-subdir)))))
+
+(defun %directory-tree-empty-p (root)
+  "Return T when ROOT does not exist or contains no files or subdirectories."
+  (let ((directory (uiop:ensure-directory-pathname root)))
+    (or (not (uiop:directory-exists-p directory))
+        (and (null (uiop:directory-files directory))
+             (null (uiop:subdirectories directory))))))
+
+(defun maybe-bootstrap-state-root (config)
+  "Copy legacy `.claw-lisp/` state into the default `.achatina/` root when needed."
+  (let* ((selected-root (%normalize-directory-root (runtime-config-state-root config)))
+         (default-root (%normalize-directory-root +default-state-root+))
+         (legacy-root (%normalize-directory-root +legacy-default-state-root+)))
+    (when (and (string= selected-root default-root)
+               (not (string= selected-root legacy-root))
+               (%directory-tree-empty-p selected-root)
+               (uiop:directory-exists-p (uiop:ensure-directory-pathname legacy-root))
+               (not (%directory-tree-empty-p legacy-root)))
+      (%copy-directory-tree-contents legacy-root selected-root)
+      (let ((marker-path (%state-root-bootstrap-marker-path selected-root)))
+        (ensure-directories-exist marker-path)
+        (with-open-file (stream marker-path
+                                :direction :output
+                                :if-exists :supersede
+                                :if-does-not-exist :create)
+          (let ((*print-case* :downcase)
+                (*print-pretty* nil))
+            (write (list :version 1
+                         :mode :bootstrap-copy
+                         :from legacy-root
+                         :to selected-root
+                         :timestamp (get-universal-time))
+                   :stream stream)))))
+    config))
 
 (defun config-credentials (config provider-name)
   "Retrieve credentials for PROVIDER-NAME (a keyword like :anthropic)."
@@ -494,13 +558,19 @@ This prevents fallback from interfering with explicit custom per-root overrides.
 (defun find-config-file ()
   "Find configuration file in standard locations.
    Project-local config deferred to Phase 3 (security review needed)."
-  (or (let ((env-path (uiop:getenv "CLAW_CONFIG_FILE")))
+  (or (let ((env-path (or (uiop:getenv "ACHATINA_CONFIG_FILE")
+                          (uiop:getenv "CLAW_CONFIG_FILE"))))
         (when (and env-path (uiop:file-exists-p env-path))
           (pathname env-path)))
       ;; Project-local intentionally omitted — see Phase 3 security review
-      (let ((user-path (merge-pathnames "claw-lisp/config.lisp"
-                                         (uiop:xdg-config-home))))
-        (when (uiop:file-exists-p user-path) user-path))))
+      (let ((achatina-path (merge-pathnames "achatina/config.lisp"
+                                            (uiop:xdg-config-home))))
+        (when (uiop:file-exists-p achatina-path)
+          achatina-path))
+      (let ((legacy-path (merge-pathnames "claw-lisp/config.lisp"
+                                          (uiop:xdg-config-home))))
+        (when (uiop:file-exists-p legacy-path)
+          legacy-path))))
 
 (defun check-config-file-permissions (path)
   "Warn if config file at PATH has overly permissive permissions.
@@ -547,7 +617,9 @@ This prevents fallback from interfering with explicit custom per-root overrides.
     ;; 4. Apply runtime overrides
     (when overrides
       (apply-overrides config overrides))
-    ;; 5. Validate
+    ;; 5. Bootstrap visible state-root migration if needed
+    (maybe-bootstrap-state-root config)
+    ;; 6. Validate
     (validate-config config)
     config))
 

@@ -746,7 +746,7 @@ REASON-CODE is one of:
 ;;;; Implements file-based storage for durable memory records.
 ;;;; Follows patterns from session-memory.lisp but is independent.
 ;;;; Serialization is in plist format for each record.
-;;;; Storage layout: .claw-lisp/memory/durable/<kind>/<subject-id>.md
+;;;; Storage layout: .achatina/memory/durable/<kind>/<subject-id>.md
 
 (in-package #:claw-lisp.storage.durable-memory)
 
@@ -755,7 +755,7 @@ REASON-CODE is one of:
 ;;; ============================================================
 
 (defparameter *durable-memory-storage-root*
-  (merge-pathnames #P".claw-lisp/memory/durable/")
+  (merge-pathnames #P".achatina/memory/durable/")
   "Root directory for durable memory storage.")
 
 (defun durable-memory-kind-directory (kind)

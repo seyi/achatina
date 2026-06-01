@@ -265,7 +265,7 @@
 
 (defun test-cas-config-accessor ()
   (let ((config (claw-lisp.config:make-default-runtime-config)))
-    (%assert (string= ".claw-lisp/cas/objects/"
+    (%assert (string= ".achatina/cas/objects/"
                        (claw-lisp.config:runtime-config-cas-objects-root config))
              "Default CAS objects root mismatch"))
   (format t "~&+ test-cas-config-accessor passed~%")
