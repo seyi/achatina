@@ -254,6 +254,65 @@
              "Unexpected transcript path: ~A"
              (namestring path))))
 
+(defun test-default-state-root-family ()
+  (let ((config (claw-lisp.config:make-default-runtime-config)))
+    (%assert (string= ".claw-lisp/" (claw-lisp.config:runtime-config-state-root config))
+             "Unexpected default state root: ~A"
+             (claw-lisp.config:runtime-config-state-root config))
+    (%assert (string= ".claw-lisp/" (claw-lisp.config:runtime-config-data-root config))
+             "Unexpected default data root: ~A"
+             (claw-lisp.config:runtime-config-data-root config))
+    (%assert (string= ".claw-lisp/transcripts/"
+                      (claw-lisp.config:runtime-config-transcripts-root config))
+             "Unexpected default transcripts root: ~A"
+             (claw-lisp.config:runtime-config-transcripts-root config))
+    (%assert (string= ".claw-lisp/artifacts/"
+                      (claw-lisp.config:runtime-config-artifacts-root config))
+             "Unexpected default artifacts root: ~A"
+             (claw-lisp.config:runtime-config-artifacts-root config))
+    (%assert (string= ".claw-lisp/memory/"
+                      (claw-lisp.config:runtime-config-memory-root config))
+             "Unexpected default memory root: ~A"
+             (claw-lisp.config:runtime-config-memory-root config))
+    (%assert (string= ".claw-lisp/cas/objects/"
+                      (claw-lisp.config:runtime-config-cas-objects-root config))
+             "Unexpected default CAS objects root: ~A"
+             (claw-lisp.config:runtime-config-cas-objects-root config))
+    (%assert (string= ".claw-lisp/cas/refs/"
+                      (claw-lisp.config:runtime-config-cas-ref-root config))
+             "Unexpected default CAS ref root: ~A"
+             (claw-lisp.config:runtime-config-cas-ref-root config))))
+
+(defun test-state-root-override-derives-family ()
+  (let ((config (claw-lisp.config:load-runtime-config
+                 :overrides '(:state-root ".achatina/"))))
+    (%assert (string= ".achatina/" (claw-lisp.config:runtime-config-state-root config))
+             "Unexpected state root after override: ~A"
+             (claw-lisp.config:runtime-config-state-root config))
+    (%assert (string= ".achatina/" (claw-lisp.config:runtime-config-data-root config))
+             "Unexpected data root after override: ~A"
+             (claw-lisp.config:runtime-config-data-root config))
+    (%assert (string= ".achatina/transcripts/"
+                      (claw-lisp.config:runtime-config-transcripts-root config))
+             "Unexpected transcripts root after override: ~A"
+             (claw-lisp.config:runtime-config-transcripts-root config))
+    (%assert (string= ".achatina/artifacts/"
+                      (claw-lisp.config:runtime-config-artifacts-root config))
+             "Unexpected artifacts root after override: ~A"
+             (claw-lisp.config:runtime-config-artifacts-root config))
+    (%assert (string= ".achatina/memory/"
+                      (claw-lisp.config:runtime-config-memory-root config))
+             "Unexpected memory root after override: ~A"
+             (claw-lisp.config:runtime-config-memory-root config))
+    (%assert (string= ".achatina/cas/objects/"
+                      (claw-lisp.config:runtime-config-cas-objects-root config))
+             "Unexpected CAS objects root after override: ~A"
+             (claw-lisp.config:runtime-config-cas-objects-root config))
+    (%assert (string= ".achatina/cas/refs/"
+                      (claw-lisp.config:runtime-config-cas-ref-root config))
+             "Unexpected CAS refs root after override: ~A"
+             (claw-lisp.config:runtime-config-cas-ref-root config))))
+
 (defun test-session-memory-path ()
   (let* ((config (claw-lisp.config:make-default-runtime-config))
          (path (session-memory-path config "session-123")))
@@ -5694,6 +5753,8 @@
   (test-anthropic-response-extraction)
   (test-openrouter-error-response-extraction)
   (test-transcript-path-for-session)
+  (test-default-state-root-family)
+  (test-state-root-override-derives-family)
   (test-session-memory-path)
   (test-durable-memory-path)
   (test-session-context-status-thresholds)

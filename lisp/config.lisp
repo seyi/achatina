@@ -152,6 +152,7 @@
 (defstruct (runtime-config
             (:constructor %make-runtime-config))
   (name "claw-lisp" :type string)
+  (state-root ".claw-lisp/" :type string)
   (data-root ".claw-lisp/" :type string)
   (transcripts-root ".claw-lisp/transcripts/" :type string)
   (artifacts-root ".claw-lisp/artifacts/" :type string)
@@ -260,6 +261,32 @@
   ;; Provider credentials keyed by provider name keyword
   (provider-credentials (make-hash-table :test 'eq) :type hash-table))
 
+(defun %normalize-directory-root (root)
+  "Return ROOT as a normalized directory namestring."
+  (namestring (uiop:ensure-directory-pathname root)))
+
+(defun apply-state-root (config root)
+  "Apply ROOT as the derived local state root for CONFIG.
+
+This updates the top-level state root plus the default data, transcript,
+artifact, memory, and CAS subroots together. Callers may still override
+individual subroots afterward when needed."
+  (let* ((normalized-root (%normalize-directory-root root))
+         (root-path (uiop:ensure-directory-pathname normalized-root)))
+    (setf (runtime-config-state-root config) normalized-root
+          (runtime-config-data-root config) normalized-root
+          (runtime-config-transcripts-root config)
+          (namestring (merge-pathnames "transcripts/" root-path))
+          (runtime-config-artifacts-root config)
+          (namestring (merge-pathnames "artifacts/" root-path))
+          (runtime-config-memory-root config)
+          (namestring (merge-pathnames "memory/" root-path))
+          (runtime-config-cas-objects-root config)
+          (namestring (merge-pathnames "cas/objects/" root-path))
+          (runtime-config-cas-ref-root config)
+          (namestring (merge-pathnames "cas/refs/" root-path))))
+  config)
+
 (defun config-credentials (config provider-name)
   "Retrieve credentials for PROVIDER-NAME (a keyword like :anthropic)."
   (gethash provider-name (runtime-config-provider-credentials config)))
@@ -324,6 +351,21 @@
     (let ((val (getf data :default-model :not-present)))
       (unless (eq val :not-present)
         (setf (runtime-config-default-model config) val)))
+    (let ((val (getf data :state-root :not-present)))
+      (unless (eq val :not-present)
+        (apply-state-root config val)))
+    (let ((val (getf data :data-root :not-present)))
+      (unless (eq val :not-present)
+        (apply-state-root config val)))
+    (let ((val (getf data :transcripts-root :not-present)))
+      (unless (eq val :not-present)
+        (setf (runtime-config-transcripts-root config) val)))
+    (let ((val (getf data :artifacts-root :not-present)))
+      (unless (eq val :not-present)
+        (setf (runtime-config-artifacts-root config) val)))
+    (let ((val (getf data :memory-root :not-present)))
+      (unless (eq val :not-present)
+        (setf (runtime-config-memory-root config) val)))
     (let ((val (getf data :tool-allowed-roots :not-present)))
       (unless (eq val :not-present)
         (setf (runtime-config-tool-allowed-roots config) val)))
@@ -392,6 +434,10 @@
 (defun apply-environment-config (config)
   "Apply environment variables to CONFIG."
   ;; Global settings
+  (let ((state-root (or (uiop:getenv "ACHATINA_STATE_ROOT")
+                        (uiop:getenv "CLAW_STATE_ROOT"))))
+    (when state-root
+      (apply-state-root config state-root)))
   (let ((provider (uiop:getenv "CLAW_DEFAULT_PROVIDER")))
     (when provider
       (setf (runtime-config-default-provider config) provider)))
@@ -485,8 +531,16 @@
               (setf (runtime-config-shell-command-enabled-p config) value))
              (:shell-command-timeout-seconds
               (setf (runtime-config-shell-command-timeout-seconds config) value))
+             (:state-root
+              (apply-state-root config value))
              (:data-root
-              (setf (runtime-config-data-root config) value))
+              (apply-state-root config value))
+             (:transcripts-root
+              (setf (runtime-config-transcripts-root config) value))
+             (:artifacts-root
+              (setf (runtime-config-artifacts-root config) value))
+             (:memory-root
+              (setf (runtime-config-memory-root config) value))
              (otherwise
               (warn "Unknown config override key: ~S" key)))))
 

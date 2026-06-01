@@ -481,11 +481,17 @@ observability records, are intentionally dropped in runner v0."
   (let ((config (claw-lisp.config:load-runtime-config
                  :overrides (list :default-provider provider
                                   :default-model model))))
-    (let ((transcripts-root (%request-environment-path request :transcript_root))
+    (let ((state-root (%request-environment-path request :state_root))
+          (data-root (%request-environment-path request :data_root))
+          (transcripts-root (%request-environment-path request :transcript_root))
           (memory-root (%request-environment-path request :memory_root))
           (artifacts-root (%request-environment-path request :artifacts_root))
           (cas-objects-root (%request-environment-path request :cas_objects_root))
           (cas-ref-root (%request-environment-path request :cas_ref_root)))
+      (when state-root
+        (claw-lisp.config:apply-state-root config state-root))
+      (when data-root
+        (claw-lisp.config:apply-state-root config data-root))
       (when transcripts-root
         (setf (claw-lisp.config:runtime-config-transcripts-root config) transcripts-root))
       (when memory-root

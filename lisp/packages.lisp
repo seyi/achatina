@@ -6,6 +6,7 @@
    ;; Structs
    #:runtime-config
    #:runtime-config-name
+   #:runtime-config-state-root
    #:runtime-config-data-root
    #:runtime-config-transcripts-root
    #:runtime-config-artifacts-root
@@ -120,6 +121,7 @@
    ;; Functions
    #:load-runtime-config
    #:find-config-file
+   #:apply-state-root
    #:redact-key
    ;; Backward compatibility
    #:make-default-runtime-config))
