@@ -298,13 +298,12 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->anthropic-block msg))))
-    (let ((body (list
-                 :model model
-                 :max_tokens 1024
-                 :messages messages)))
-      (when tools
-        (push (cons :tools tools) body))
-      body)))
+    (append (list
+             :model model
+             :max_tokens 1024
+             :messages messages)
+            (when tools
+              (list :tools tools)))))
 
 (defun conversation->chat-json (conversation model &key tools)
   "Render CONVERSATION into an OpenRouter/chat-completions JSON request body.
@@ -313,10 +312,9 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->chat-completion-block msg))))
-    (let ((body (list :model model :messages messages)))
-      (when tools
-        (push (cons :tools tools) body))
-      body)))
+    (append (list :model model :messages messages)
+            (when tools
+              (list :tools tools)))))
 
 ;; --- Response Extraction (yason-based, no Python) ---
 

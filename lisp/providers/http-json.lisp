@@ -4,6 +4,13 @@
 ;; Lives in its own file so transcripts.lisp can depend on it without pulling
 ;; in the full http-utils (which depends on dexador).
 
+(defun plist-keyword-pairs-p (value)
+  "Return T when VALUE is a proper plist keyed entirely by keywords."
+  (and (listp value)
+       (evenp (length value))
+       (loop for rest on value by #'cddr
+             always (keywordp (first rest)))))
+
 (defun value->json-safe (v)
   "Convert a Lisp value to a JSON-safe form.
    Keywords become strings. Plists become hash tables.
@@ -17,7 +24,7 @@
     ((vectorp v)
      ;; Vectors become JSON arrays
      (map 'vector #'value->json-safe v))
-    ((and (listp v) (evenp (length v)) (keywordp (first v)))
+    ((plist-keyword-pairs-p v)
      ;; Treat as plist → hash table
      (plist-to-json-object v))
     ((listp v)

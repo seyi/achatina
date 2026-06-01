@@ -64,7 +64,7 @@ Docker CLI path forwards it into the container automatically. Today that covers:
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
-- `OPEN_ROUTER_API_KEY`
+- `OPEN_ROUTER_API_KEY` (accepted as an alias for `OPENROUTER_API_KEY`)
 
 Once inside the CLI, use:
 
@@ -168,7 +168,7 @@ Anthropic provider registered, but credentials are not configured.
 ```
 
 The same passthrough pattern also works for `OPENAI_API_KEY`,
-`OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` when those providers are
+`OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` (alias) when those providers are
 configured locally.
 
 ## Supported Providers In This Build

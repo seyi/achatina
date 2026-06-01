@@ -189,6 +189,45 @@
                "Expected serialized messages array in OpenRouter JSON, got ~A"
                (json-encode-string body)))))
 
+(defun test-openrouter-chat-json-tools-serialize-as-array-of-objects ()
+  (let* ((conversation (make-conversation :id "test-openrouter-chat-json-tools"))
+         (tools (list (list :name "file-read"
+                            :description "Read a file"
+                            :input_schema (list :type "object"
+                                                :properties (list :path (list :type "string"))
+                                                :required #("path")))))
+         (body (conversation->chat-json conversation
+                                        "anthropic/claude-sonnet-4-6"
+                                        :tools tools))
+         (json (json-encode-string body)))
+    (%assert (search "\"tools\":[{" json)
+             "Expected serialized tools array in OpenRouter JSON, got ~A"
+             json)
+    (%assert (search "\"name\":\"file-read\"" json)
+             "Expected serialized tool name in OpenRouter JSON, got ~A"
+             json)
+    (%assert (search "\"input_schema\":{\"type\":\"object\"" json)
+             "Expected serialized tool schema object in OpenRouter JSON, got ~A"
+             json)))
+
+(defun test-openrouter-env-alias-loads-credentials ()
+  (%with-redefined-function
+      ('uiop:getenv
+       (lambda (name)
+         (cond
+           ((string= name "OPEN_ROUTER_API_KEY") "alias-test-key")
+           ((string= name "OPENROUTER_API_KEY") nil)
+           ((string= name "OPENROUTER_BASE_URL") nil)
+           (t nil))))
+    (let ((config (claw-lisp.config:make-default-runtime-config)))
+      (setf (claw-lisp.config:config-credentials config :openrouter) nil)
+      (claw-lisp.config::load-provider-credentials-from-env config :openrouter)
+      (let ((creds (claw-lisp.config:config-credentials config :openrouter)))
+        (%assert creds "Expected OPEN_ROUTER_API_KEY alias to load OpenRouter credentials")
+        (%assert (string= "alias-test-key"
+                          (claw-lisp.config:provider-credentials-api-key creds))
+                 "Expected alias env var value to populate OpenRouter credentials")))))
+
 (defun test-openrouter-response-extraction ()
   (let ((text (extract-openrouter-response-text
                "{\"choices\":[{\"message\":{\"content\":\"hello\"}}]}")))
@@ -5649,6 +5688,8 @@
   (test-content-block-roundtrip)
   (test-anthropic-json-format)
   (test-openrouter-chat-json-single-message-uses-array)
+  (test-openrouter-chat-json-tools-serialize-as-array-of-objects)
+  (test-openrouter-env-alias-loads-credentials)
   (test-openrouter-response-extraction)
   (test-anthropic-response-extraction)
   (test-openrouter-error-response-extraction)

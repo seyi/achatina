@@ -359,7 +359,8 @@
                 :api-key key
                 :base-url (or url "https://api.anthropic.com/v1/messages"))))))
     (:openrouter
-     (let ((key (uiop:getenv "OPENROUTER_API_KEY"))
+     (let ((key (or (uiop:getenv "OPENROUTER_API_KEY")
+                    (uiop:getenv "OPEN_ROUTER_API_KEY")))
            (url (uiop:getenv "OPENROUTER_BASE_URL")))
        (when key
          (setf (config-credentials config provider-key)
