@@ -313,6 +313,96 @@
              "Unexpected CAS refs root after override: ~A"
              (claw-lisp.config:runtime-config-cas-ref-root config))))
 
+(defun test-resume-session-falls-back-to-legacy-transcript-root ()
+  (let* ((temp-root (merge-pathnames
+                     (format nil "claw-lisp-legacy-transcript-~D-~D/"
+                             (get-universal-time)
+                             (get-internal-real-time))
+                     (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist temp-root)
+           (uiop:with-current-directory (temp-root)
+             (let* ((legacy-config (claw-lisp.config:make-default-runtime-config))
+                    (legacy-path (transcript-path-for-session legacy-config "legacy-session"))
+                    (config (claw-lisp.config:load-runtime-config
+                             :overrides '(:state-root ".achatina/"
+                                          :default-provider "mock"
+                                          :default-model "mock-model")))
+                    (runtime (make-runtime :config config)))
+               (register-default-providers runtime)
+               (claw-lisp.storage.transcripts:append-transcript-event
+                legacy-path
+                (list :event "session_start"
+                      :session_id "legacy-session"
+                      :provider "mock"
+                      :model "mock-model"))
+               (claw-lisp.storage.transcripts:append-transcript-event
+                legacy-path
+                (list :event "message"
+                      :role "user"
+                      :content "hello from legacy transcript"))
+               (claw-lisp.storage.transcripts:append-transcript-event
+                legacy-path
+                (list :event "message"
+                      :role "assistant"
+                      :content "legacy reply"))
+               (%assert (equal (namestring legacy-path)
+                               (namestring
+                                (claw-lisp.core.runtime:transcript-existing-path-for-session-id
+                                 runtime "legacy-session")))
+                        "Expected fallback transcript path to resolve to legacy root")
+               (let ((session (claw-lisp.core.runtime:resume-session runtime "legacy-session")))
+                 (%assert (claw-lisp.core.runtime::session-state-value
+                           session :resumed-from-transcript nil)
+                          "Expected resumed session marker")
+                 (%assert (= 2
+                             (claw-lisp.core.runtime::session-state-value
+                              session :resumed-message-count 0))
+                          "Expected two restored transcript messages")))))
+      (when (uiop:directory-exists-p temp-root)
+        (uiop:delete-directory-tree temp-root :validate t)))))
+
+(defun test-read-session-memory-text-falls-back-to-legacy-root ()
+  (let* ((temp-root (merge-pathnames
+                     (format nil "claw-lisp-legacy-memory-~D-~D/"
+                             (get-universal-time)
+                             (get-internal-real-time))
+                     (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist temp-root)
+           (uiop:with-current-directory (temp-root)
+             (let* ((legacy-config (claw-lisp.config:make-default-runtime-config))
+                    (legacy-path (session-memory-path legacy-config "legacy-memory"))
+                    (config (claw-lisp.config:load-runtime-config
+                             :overrides '(:state-root ".achatina/"
+                                          :default-provider "mock"
+                                          :default-model "mock-model")))
+                    (runtime (make-runtime :config config))
+                    (session (claw-lisp.core.domain:make-agent-session
+                              :id "legacy-memory"
+                              :provider "mock"
+                              :model "mock-model"
+                              :conversation (make-conversation :id "legacy-memory")
+                              :state '(:initialized t))))
+               (ensure-directories-exist legacy-path)
+               (with-open-file (stream legacy-path
+                                       :direction :output
+                                       :if-exists :supersede
+                                       :if-does-not-exist :create)
+                 (write-string "legacy memory note" stream))
+               (%assert (equal (namestring legacy-path)
+                               (namestring
+                                (claw-lisp.storage.session-memory:session-memory-existing-path
+                                 config "legacy-memory")))
+                        "Expected fallback session-memory path to resolve to legacy root")
+               (%assert (string= "legacy memory note"
+                                 (claw-lisp.core.runtime:read-session-memory-text runtime session))
+                        "Expected session-memory read fallback to return legacy text"))))
+      (when (uiop:directory-exists-p temp-root)
+        (uiop:delete-directory-tree temp-root :validate t)))))
+
 (defun test-session-memory-path ()
   (let* ((config (claw-lisp.config:make-default-runtime-config))
          (path (session-memory-path config "session-123")))
@@ -3951,9 +4041,14 @@
                                   :provider-name "mock"
                                   :model "mock-model"
                                   :session-id "phase9-transcript-nil-path")))
-      (let ((old-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-path)))
+      (let ((old-existing-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path))
+            (old-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-path)))
         (unwind-protect
              (progn
+               (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path)
+                     (lambda (&rest args)
+                       (declare (ignore args))
+                       nil))
                (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path)
                      (lambda (&rest args)
                        (declare (ignore args))
@@ -3978,6 +4073,8 @@
                           "Expected tail heading for NIL transcript path, got ~S" tail-output)
                  (%assert (search "(no lines)" tail-output)
                           "Expected empty tail for NIL transcript path, got ~S" tail-output)))
+          (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path)
+                old-existing-fn)
           (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path) old-fn))))))
 
 (defun test-phase9-cli-transcript-when-transcript-unreadable ()
@@ -4700,9 +4797,14 @@
                                   :provider-name "mock"
                                   :model "mock-model"
                                   :session-id "phase9-cli-diagnostics-no-transcript"))
+          (old-existing-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path))
           (old-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-path)))
       (unwind-protect
            (progn
+             (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path)
+                   (lambda (&rest args)
+                     (declare (ignore args))
+                     nil))
              (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path)
                    (lambda (&rest args)
                      (declare (ignore args))
@@ -4712,6 +4814,7 @@
                        (claw-lisp.cli::handle-command runtime session ":diagnostics"))))
                (%assert (search "Transcript path: (none)" output)
                         "Expected diagnostics NIL transcript path fallback, got ~S" output)))
+        (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path) old-existing-fn)
         (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path) old-fn)))))
 
 (defun test-phase9-cli-diagnostics-protects-external-calls ()
@@ -4723,6 +4826,7 @@
                                   :session-id "phase9-cli-diagnostics-errors"))
           (old-provider-fn (symbol-function 'claw-lisp.core.runtime:list-provider-names))
           (old-tool-fn (symbol-function 'claw-lisp.core.runtime:list-tool-names))
+          (old-transcript-existing-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path))
           (old-transcript-fn (symbol-function 'claw-lisp.core.runtime:session-transcript-path)))
       (unwind-protect
            (progn
@@ -4746,6 +4850,10 @@
                (%assert (search "Runtime diagnostics failed: tool list failed" output)
                         "Expected tool-list diagnostics failure, got ~S" output))
              (setf (symbol-function 'claw-lisp.core.runtime:list-tool-names) old-tool-fn)
+             (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path)
+                   (lambda (&rest args)
+                     (declare (ignore args))
+                     (error "transcript path failed")))
              (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path)
                    (lambda (&rest args)
                      (declare (ignore args))
@@ -4757,6 +4865,8 @@
                         "Expected transcript-path diagnostics failure, got ~S" output)))
         (setf (symbol-function 'claw-lisp.core.runtime:list-provider-names) old-provider-fn)
         (setf (symbol-function 'claw-lisp.core.runtime:list-tool-names) old-tool-fn)
+        (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-existing-path)
+              old-transcript-existing-fn)
         (setf (symbol-function 'claw-lisp.core.runtime:session-transcript-path) old-transcript-fn)))))
 
 (defun test-phase9-cli-diagnostics-emits-debug-warnings ()
@@ -5755,6 +5865,8 @@
   (test-transcript-path-for-session)
   (test-default-state-root-family)
   (test-state-root-override-derives-family)
+  (test-resume-session-falls-back-to-legacy-transcript-root)
+  (test-read-session-memory-text-falls-back-to-legacy-root)
   (test-session-memory-path)
   (test-durable-memory-path)
   (test-session-context-status-thresholds)

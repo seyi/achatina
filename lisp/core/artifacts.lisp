@@ -98,6 +98,28 @@
     (unless (or (null root) (string= "" root))
       root)))
 
+(defun %runtime-compatible-cas-root (runtime)
+  (claw-lisp.config:runtime-config-compatibility-root
+   (claw-lisp.core.runtime:runtime-settings runtime)
+   :cas-objects-root))
+
+(defun %runtime-compatible-cas-ref-root (runtime)
+  (claw-lisp.config:runtime-config-compatibility-root
+   (claw-lisp.core.runtime:runtime-settings runtime)
+   :cas-ref-root))
+
+(defun %runtime-cas-read-root-pairs (runtime)
+  (remove nil
+          (list (let ((cas-root (runtime-effective-cas-root runtime))
+                      (ref-root (runtime-effective-cas-ref-root runtime)))
+                  (when (or cas-root ref-root)
+                    (list cas-root ref-root)))
+                (let ((legacy-cas-root (%runtime-compatible-cas-root runtime))
+                      (legacy-ref-root (%runtime-compatible-cas-ref-root runtime)))
+                  (when (or legacy-cas-root legacy-ref-root)
+                    (list legacy-cas-root legacy-ref-root))))
+          :test #'equal))
+
 (defun %normalize-tool-name (tool-name)
   (let ((text (string-downcase (string tool-name))))
     (map-into text
@@ -144,15 +166,17 @@
         ref-name))))
 
 (defun %resolve-legacy-path-cas-mapping (runtime legacy-path &key (require-object-p nil))
-  (let ((ref-root (runtime-effective-cas-ref-root runtime))
-        (cas-root (runtime-effective-cas-root runtime)))
-    (when (and ref-root cas-root)
-      (let* ((ref-name (legacy-path-cas-ref-name legacy-path))
-             (record (claw-lisp.storage.cas-ref:read-cas-ref ref-root ref-name))
-             (cas-hash (and record
-                            (claw-lisp.storage.cas-ref:resolve-cas-ref
-                             ref-root cas-root ref-name :require-object-p require-object-p))))
-        (values cas-hash ref-name record)))))
+  (dolist (roots (%runtime-cas-read-root-pairs runtime)
+           (values nil nil nil))
+    (destructuring-bind (cas-root ref-root) roots
+      (when (and ref-root cas-root)
+        (let* ((ref-name (legacy-path-cas-ref-name legacy-path))
+               (record (claw-lisp.storage.cas-ref:read-cas-ref ref-root ref-name))
+               (cas-hash (and record
+                              (claw-lisp.storage.cas-ref:resolve-cas-ref
+                               ref-root cas-root ref-name :require-object-p require-object-p))))
+          (when cas-hash
+            (return (values cas-hash ref-name record))))))))
 
 (defun %legacy-tool-results-root (runtime &key session-id)
   (let ((artifacts-root
@@ -491,18 +515,21 @@ Returns a summary plist with migrated, already-mapped, and failed paths."
          (cas-hash (tool-result-cas-hash compatible-result))
          (ref-name (tool-result-cas-ref-name compatible-result)))
     (%ensure-valid-versioned-hash-or-error cas-hash)
-    (when (and prefer-cas-p cas-root)
-      (when (and ref-name ref-root)
-        (let ((resolved (resolve-cas-ref ref-root cas-root ref-name
-                                         :require-object-p nil)))
-          (when resolved
-            (let ((text (cas-get cas-root resolved)))
+    (when prefer-cas-p
+      (dolist (roots (%runtime-cas-read-root-pairs runtime))
+        (destructuring-bind (read-cas-root read-ref-root) roots
+          (when (and read-cas-root ref-name read-ref-root)
+            (let ((resolved (resolve-cas-ref read-ref-root read-cas-root ref-name
+                                             :require-object-p nil)))
+              (when resolved
+                (let ((text (cas-get read-cas-root resolved)))
+                  (when text
+                    (return-from resolve-tool-result-cas text))))))
+          (when (and read-cas-root cas-hash
+                     (claw-lisp.storage.cas:cas-exists-p read-cas-root cas-hash))
+            (let ((text (cas-get read-cas-root cas-hash)))
               (when text
-                (return-from resolve-tool-result-cas text))))))
-      (when (and cas-hash (claw-lisp.storage.cas:cas-exists-p cas-root cas-hash))
-        (let ((text (cas-get cas-root cas-hash)))
-          (when text
-            (return-from resolve-tool-result-cas text)))))
+                (return-from resolve-tool-result-cas text)))))))
     (or (let ((path (tool-result-persisted-path compatible-result)))
           (when (and path (probe-file path))
             (uiop:read-file-string path)))
@@ -575,19 +602,18 @@ Returns a summary plist with migrated, already-mapped, and failed paths."
 
 (defun resolve-artifact-from-cas (runtime artifact)
   "Fetch and deserialize ARTIFACT payload from CAS under RUNTIME."
-  (let* ((cas-root (runtime-effective-cas-root runtime))
-         (ref-root (runtime-effective-cas-ref-root runtime))
-         (cas-hash (artifact-cas-hash artifact))
+  (let* ((cas-hash (artifact-cas-hash artifact))
          (ref-name (artifact-cas-ref-name artifact))
-         (type (artifact-cas-type artifact))
-         (resolved-hash (or (and cas-root ref-name ref-root
-                                 (resolve-cas-ref ref-root cas-root ref-name
-                                                  :require-object-p t))
-                            cas-hash)))
-    (%ensure-valid-versioned-hash-or-error resolved-hash)
-    (unless (and cas-root resolved-hash)
-      (error "Artifact has no CAS hash or resolvable ref: ~S" artifact))
-    (let ((text (cas-get cas-root resolved-hash)))
-      (unless text
-        (error "CAS object is missing for artifact hash: ~A" resolved-hash))
-      (%deserialize-artifact-payload text type))))
+         (type (artifact-cas-type artifact)))
+    (dolist (roots (%runtime-cas-read-root-pairs runtime)
+             (error "CAS object is missing for artifact hash/ref: ~S" artifact))
+      (destructuring-bind (cas-root ref-root) roots
+        (let ((resolved-hash (or (and cas-root ref-name ref-root
+                                      (resolve-cas-ref ref-root cas-root ref-name
+                                                       :require-object-p t))
+                                 cas-hash)))
+          (%ensure-valid-versioned-hash-or-error resolved-hash)
+          (when (and cas-root resolved-hash)
+            (let ((text (cas-get cas-root resolved-hash)))
+              (when text
+                (return (%deserialize-artifact-payload text type))))))))))

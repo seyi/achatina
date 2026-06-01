@@ -16,6 +16,18 @@
      (make-pathname :name session-id :type "jsonl")
      (uiop:ensure-directory-pathname root))))
 
+(defun transcript-existing-path-for-session (config session-id)
+  "Return the existing transcript pathname for SESSION-ID, with legacy fallback."
+  (let ((current-path (transcript-path-for-session config session-id)))
+    (or (and (probe-file current-path) current-path)
+        (let ((legacy-root (claw-lisp.config:runtime-config-compatibility-root
+                            config :transcripts-root)))
+          (when legacy-root
+            (let ((legacy-path (merge-pathnames
+                                (make-pathname :name session-id :type "jsonl")
+                                (uiop:ensure-directory-pathname legacy-root))))
+              (and (probe-file legacy-path) legacy-path)))))))
+
 (defun append-line (pathname line)
   "Append LINE plus a newline to PATHNAME."
   (ensure-directory-path pathname)

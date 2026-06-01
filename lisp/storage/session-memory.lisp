@@ -103,6 +103,20 @@ This version is for local/runtime compatibility and may evolve in future phases.
    (uiop:ensure-directory-pathname
     (runtime-config-memory-root config))))
 
+(defun session-memory-existing-path (config session-id)
+  "Return the existing markdown session-memory pathname for SESSION-ID, with legacy fallback."
+  (let ((current-path (session-memory-path config session-id)))
+    (or (and (probe-file current-path) current-path)
+        (let ((legacy-root (claw-lisp.config:runtime-config-compatibility-root
+                            config :memory-root)))
+          (when legacy-root
+            (let ((legacy-path (merge-pathnames
+                                (make-pathname :directory '(:relative "session")
+                                               :name session-id
+                                               :type "md")
+                                (uiop:ensure-directory-pathname legacy-root))))
+              (and (probe-file legacy-path) legacy-path)))))))
+
 (defun session-memory-structured-path (config session-id)
   "Return the structured JSON session-memory pathname for SESSION-ID."
   (merge-pathnames

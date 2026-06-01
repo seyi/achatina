@@ -261,9 +261,34 @@
   ;; Provider credentials keyed by provider name keyword
   (provider-credentials (make-hash-table :test 'eq) :type hash-table))
 
+(defparameter +legacy-default-state-root+ ".claw-lisp/"
+  "Legacy default local state root retained for compatibility reads.")
+
 (defun %normalize-directory-root (root)
   "Return ROOT as a normalized directory namestring."
   (namestring (uiop:ensure-directory-pathname root)))
+
+(defun %derived-root-for-kind (state-root kind)
+  "Return the derived root namestring for KIND under STATE-ROOT."
+  (let* ((normalized-root (%normalize-directory-root state-root))
+         (root-path (uiop:ensure-directory-pathname normalized-root)))
+    (ecase kind
+      (:data-root normalized-root)
+      (:transcripts-root (namestring (merge-pathnames "transcripts/" root-path)))
+      (:artifacts-root (namestring (merge-pathnames "artifacts/" root-path)))
+      (:memory-root (namestring (merge-pathnames "memory/" root-path)))
+      (:cas-objects-root (namestring (merge-pathnames "cas/objects/" root-path)))
+      (:cas-ref-root (namestring (merge-pathnames "cas/refs/" root-path))))))
+
+(defun %runtime-config-root-for-kind (config kind)
+  "Return CONFIG's current root value for KIND."
+  (ecase kind
+    (:data-root (runtime-config-data-root config))
+    (:transcripts-root (runtime-config-transcripts-root config))
+    (:artifacts-root (runtime-config-artifacts-root config))
+    (:memory-root (runtime-config-memory-root config))
+    (:cas-objects-root (runtime-config-cas-objects-root config))
+    (:cas-ref-root (runtime-config-cas-ref-root config))))
 
 (defun apply-state-root (config root)
   "Apply ROOT as the derived local state root for CONFIG.
@@ -286,6 +311,22 @@ individual subroots afterward when needed."
           (runtime-config-cas-ref-root config)
           (namestring (merge-pathnames "cas/refs/" root-path))))
   config)
+
+(defun runtime-config-compatibility-root (config kind)
+  "Return the legacy compatibility root for KIND, or NIL when not applicable.
+
+Compatibility fallback is only enabled when:
+- CONFIG's state root is not the legacy default
+- the current KIND root is still the derived default for that state root
+
+This prevents fallback from interfering with explicit custom per-root overrides."
+  (let* ((current-state-root (%normalize-directory-root (runtime-config-state-root config)))
+         (legacy-state-root (%normalize-directory-root +legacy-default-state-root+)))
+    (unless (string= current-state-root legacy-state-root)
+      (let ((current-root (%runtime-config-root-for-kind config kind))
+            (derived-current (%derived-root-for-kind current-state-root kind)))
+        (when (string= current-root derived-current)
+          (%derived-root-for-kind legacy-state-root kind))))))
 
 (defun config-credentials (config provider-name)
   "Retrieve credentials for PROVIDER-NAME (a keyword like :anthropic)."

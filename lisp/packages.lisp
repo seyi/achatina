@@ -122,6 +122,7 @@
    #:load-runtime-config
    #:find-config-file
    #:apply-state-root
+   #:runtime-config-compatibility-root
    #:redact-key
    ;; Backward compatibility
    #:make-default-runtime-config))
@@ -417,6 +418,7 @@
                 #:value->json-safe)
   (:export
    #:transcript-path-for-session
+   #:transcript-existing-path-for-session
    #:ensure-session-transcript
    #:append-transcript-event))
 
@@ -1154,6 +1156,7 @@
    #:render-session-memory
    #:render-session-memory-structured
    #:session-memory-path
+   #:session-memory-existing-path
    #:session-memory-structured-path
    #:update-session-memory))
 
@@ -1844,6 +1847,8 @@
    #:extract-session-durable-memory
    #:session-memory-path-for-session
    #:session-transcript-path
+   #:session-transcript-existing-path
+   #:transcript-existing-path-for-session-id
    #:execute-registered-tool
    #:execute-provider-turn-loop
    #:maybe-append-transcript-event

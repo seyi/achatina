@@ -956,6 +956,32 @@
   (format t "~&+ test-resolve-artifact-invalid-hash-rejected passed~%")
   t)
 
+(defun test-resolve-artifact-falls-back-to-legacy-state-root ()
+  (let* ((temp-root (merge-pathnames
+                     (format nil "claw-lisp-legacy-cas-~D-~D/"
+                             (get-universal-time)
+                             (get-internal-real-time))
+                     (uiop:temporary-directory))))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist temp-root)
+           (uiop:with-current-directory (temp-root)
+             (let* ((legacy-config (claw-lisp.config:make-default-runtime-config))
+                    (legacy-runtime (make-runtime :config legacy-config))
+                    (artifact (claw-lisp.core.artifacts:persist-artifact-to-cas
+                               legacy-runtime :note "legacy artifact" :type :markdown))
+                    (new-config (claw-lisp.config:load-runtime-config
+                                 :overrides '(:state-root ".achatina/")))
+                    (new-runtime (make-runtime :config new-config)))
+               (%assert (string= "legacy artifact"
+                                 (claw-lisp.core.artifacts:resolve-artifact-from-cas
+                                  new-runtime artifact))
+                        "Expected CAS artifact resolution to fall back to legacy state root"))))
+      (when (uiop:directory-exists-p temp-root)
+        (uiop:delete-directory-tree temp-root :validate t))))
+  (format t "~&+ test-resolve-artifact-falls-back-to-legacy-state-root passed~%")
+  t)
+
 (defun test-binary-artifact-payload-rejected-consistently ()
   (let ((serialized nil)
         (signaled nil))
@@ -1002,5 +1028,6 @@
   (test-tool-result-dedup-isolated-per-runtime)
   (test-persist-artifact-without-cas-root-best-effort)
   (test-resolve-artifact-invalid-hash-rejected)
+  (test-resolve-artifact-falls-back-to-legacy-state-root)
   (test-binary-artifact-payload-rejected-consistently)
   (format t "~&=== CAS artifact facade tests passed ===~%"))

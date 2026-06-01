@@ -81,6 +81,18 @@
   (transcript-path-for-session (runtime-settings runtime)
                                (claw-lisp.core.domain:agent-session-id session)))
 
+(defun session-transcript-existing-path (runtime session)
+  "Return the existing transcript path for SESSION, with legacy fallback."
+  (claw-lisp.storage.transcripts:transcript-existing-path-for-session
+   (runtime-settings runtime)
+   (claw-lisp.core.domain:agent-session-id session)))
+
+(defun transcript-existing-path-for-session-id (runtime session-id)
+  "Return the existing transcript path for SESSION-ID, with legacy fallback."
+  (claw-lisp.storage.transcripts:transcript-existing-path-for-session
+   (runtime-settings runtime)
+   session-id))
+
 (defun session-memory-path-for-session (runtime session)
   "Return the session-memory path for SESSION under RUNTIME configuration."
   (session-memory-path (runtime-settings runtime)
@@ -1125,7 +1137,8 @@ This baseline resume path restores only `message` events (user/assistant text).
 It does not restore tool results, child-agent events, compaction metadata, or
 other runtime state."
   (let* ((config (runtime-settings runtime))
-         (transcript-path (transcript-path-for-session config session-id)))
+         (transcript-path (claw-lisp.storage.transcripts:transcript-existing-path-for-session
+                           config session-id)))
     (unless (probe-file transcript-path)
       (error "No transcript found for session: ~A" session-id))
     (multiple-value-bind (inferred-provider inferred-model)
@@ -1401,6 +1414,10 @@ later phases."
    Errors are degraded to NIL so callers can treat missing/failed reads as
    absence of session memory."
   (let ((path (session-memory-path-for-session runtime session)))
+    (let ((path (or (claw-lisp.storage.session-memory:session-memory-existing-path
+                     (runtime-settings runtime)
+                     (claw-lisp.core.domain:agent-session-id session))
+                    path)))
     (handler-case
         (when (probe-file path)
           (let ((text (uiop:read-file-string path)))
@@ -1410,7 +1427,7 @@ later phases."
         (warn "Failed to read session memory for session ~A: ~A"
               (claw-lisp.core.domain:agent-session-id session)
               condition)
-        nil))))
+        nil)))))
 
 (defun session-memory-update-needed-p (runtime session)
   "Return T when session memory should be updated for SESSION.
