@@ -58,6 +58,13 @@ make DOCKER="sudo docker" docker-cli
 ```
 
 This starts the current CLI entrypoint inside the containerized environment.
+If your host shell already has a supported provider API key exported, the
+Docker CLI path forwards it into the container automatically. Today that covers:
+
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
+- `OPEN_ROUTER_API_KEY`
 
 Once inside the CLI, use:
 
@@ -122,6 +129,26 @@ What this proves:
 This is a better first runtime check than stopping at `:help`, because it shows
 real runtime inspection commands without requiring API keys or provider setup.
 
+## Real Provider Check
+
+If you want to try a real model after the no-key validation path, export a
+provider key in your host shell first:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+make docker-cli
+```
+
+Then, inside the CLI, enter a normal user message such as:
+
+```text
+say hello in one sentence
+```
+
+The same passthrough pattern also works for `OPENAI_API_KEY`,
+`OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` when those providers are
+configured locally.
+
 ## Current Reality
 
 This repository is strongest today as:
@@ -142,9 +169,50 @@ The launch surface is intentionally focused on those capabilities.
 6. Use `:help` to inspect the wider interactive surface.
 7. Read `ARCHITECTURE.md` for the staged model.
 
-## Notes
+## Troubleshooting
 
-- Internal system and CLI identifiers may still use `claw-lisp` naming during
-  the first public release.
-- Public repo naming and internal package naming do not have to be fully
-  synchronized on day one.
+### Docker permission denied
+
+If Docker requires privilege on your host, rerun the commands with:
+
+```bash
+make DOCKER="sudo docker" docker-build
+make DOCKER="sudo docker" docker-load
+make DOCKER="sudo docker" docker-test
+make DOCKER="sudo docker" docker-cli
+```
+
+### `docker-load` or `docker-test` fails because the image does not exist
+
+Build the image first:
+
+```bash
+make docker-build
+```
+
+Then rerun:
+
+```bash
+make docker-load
+make docker-test
+```
+
+### `docker-test` passes but you are not sure what to do next
+
+Use the minimal runtime check:
+
+```bash
+make docker-cli
+```
+
+Then run:
+
+```text
+:status
+:providers
+:tools
+:cas
+```
+
+That is the smallest real post-test interaction that proves the live runtime
+surface is available.

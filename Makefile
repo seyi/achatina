@@ -17,8 +17,15 @@ LOAD_WITH_KNOWN_WARNING_FILTER = (handler-bind ((sb-kernel:redefinition-with-def
 	    (when restart \
 	      (invoke-restart restart)))))) \
 	%LOAD-FORM%)
+DOCKER_PROVIDER_ENV = \
+	-e ANTHROPIC_API_KEY \
+	-e OPENAI_API_KEY \
+	-e OPENROUTER_API_KEY \
+	-e OPEN_ROUTER_API_KEY
 DOCKER_RUN = $(DOCKER) run --rm -v "$(APP_ROOT):/workspace" \
-	-v "$(SBCL_CACHE_VOLUME):/root/.cache/common-lisp" -w /workspace $(IMAGE)
+	-v "$(SBCL_CACHE_VOLUME):/root/.cache/common-lisp" \
+	$(DOCKER_PROVIDER_ENV) \
+	-w /workspace $(IMAGE)
 
 .PHONY: lisp-load
 lisp-load:
