@@ -9,9 +9,12 @@
 (defun make-openrouter-provider (config)
   "Create the OpenRouter provider object from runtime config."
   (declare (type runtime-config config))
-  (make-instance 'openrouter-provider
-                 :name "openrouter"
-                 :credentials (claw-lisp.config:config-credentials config :openrouter)))
+  (let ((creds (claw-lisp.config:config-credentials config :openrouter)))
+    (make-instance 'openrouter-provider
+                   :name "openrouter"
+                   :api-key (and creds
+                                 (claw-lisp.config:provider-credentials-api-key creds))
+                   :credentials creds)))
 
 (defun provider-configured-p (provider)
   "Return T if PROVIDER has valid credentials."

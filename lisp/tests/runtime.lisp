@@ -4216,6 +4216,22 @@
           (%assert (search "Unknown model: missing-model" (princ-to-string condition))
                    "Expected unknown-model error, got ~A" condition))))))
 
+(defun test-phase9-provider-credential-check-uses-registered-provider-api-keys ()
+  (let* ((config (claw-lisp.config::%make-runtime-config))
+         (runtime nil))
+    (setf (claw-lisp.config:config-credentials config :anthropic)
+          (claw-lisp.config:make-anthropic-credentials
+           :api-key "anthropic-test-key"))
+    (setf (claw-lisp.config:config-credentials config :openrouter)
+          (claw-lisp.config:make-openrouter-credentials
+           :api-key "openrouter-test-key"))
+    (setf runtime (make-runtime :config config))
+    (register-default-providers runtime)
+    (%assert (null (claw-lisp.core.runtime:check-provider-configuration runtime "anthropic"))
+             "Expected anthropic provider credentials to satisfy provider readiness checks")
+    (%assert (null (claw-lisp.core.runtime:check-provider-configuration runtime "openrouter"))
+             "Expected openrouter provider credentials to satisfy provider readiness checks")))
+
 (defun test-phase9-select-session-model-preserves-input-model-id-for-alias-and-prefix ()
   (let ((runtime (make-runtime)))
     (register-default-providers runtime)
@@ -5449,6 +5465,7 @@
   (test-phase9-select-session-model-concurrent-calls-serialize)
   (test-phase9-select-session-model-provider-default-warning)
   (test-phase9-select-session-model-fallback-warning)
+  (test-phase9-provider-credential-check-uses-registered-provider-api-keys)
   (test-phase9-select-session-model-preserves-input-model-id-for-alias-and-prefix)
   (test-phase9-cli-provider-model-and-use-commands)
   (test-phase9-cli-models-no-registered-models-for-provider)

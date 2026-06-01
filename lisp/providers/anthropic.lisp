@@ -22,6 +22,8 @@
   (let ((creds (claw-lisp.config:config-credentials config :anthropic)))
     (make-instance 'anthropic-provider
                    :name "anthropic"
+                   :api-key (and creds
+                                 (claw-lisp.config:provider-credentials-api-key creds))
                    :credentials creds
                    :rate-limit-state (claw-lisp.providers.rate-limit:make-rate-limit-state
                                       :provider :anthropic))))
