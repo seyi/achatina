@@ -753,8 +753,8 @@ that starts with '[' and contains 'error' or 'timed out'."
              (plusp (length content))
              (char= (char content 0) #\[)
              (let ((downcased (string-downcase content)))
-               (or (search "error" downcased)
-                   (search "timed out" downcased)))))))
+               (or (not (null (search "error" downcased)))
+                   (not (null (search "timed out" downcased)))))))))
 
 (defun make-tool-result-message (tool-results)
   "Build a user message containing tool_result content blocks.

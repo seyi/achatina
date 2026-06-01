@@ -283,6 +283,30 @@
              "Unexpected default CAS ref root: ~A"
              (claw-lisp.config:runtime-config-cas-ref-root config))))
 
+(defun test-tool-result-error-p-returns-boolean ()
+  (let* ((result (claw-lisp.core.domain:make-tool-result
+                  :call-id "call-bool-1"
+                  :tool-name "echo"
+                  :content "[error] invalid tool input")))
+    (%assert (eq t (claw-lisp.core.runtime::tool-result-error-p result))
+             "Expected tool-result-error-p to return boolean T for bracketed error content")))
+
+(defun test-make-tool-result-message-normalizes-error-flag-to-boolean ()
+  (let* ((result (claw-lisp.core.domain:make-tool-result
+                  :call-id "call-bool-2"
+                  :tool-name "echo"
+                  :content "[error] invalid tool input"))
+         (message (claw-lisp.core.runtime::make-tool-result-message (list result)))
+         (content (claw-lisp.core.domain:message-content message))
+         (block (first content)))
+    (%assert (claw-lisp.core.domain:tool-result-block-p block)
+             "Expected a tool-result-block, got ~A" (type-of block))
+    (%assert (typep (claw-lisp.core.domain:tool-result-block-is-error block) 'boolean)
+             "Expected tool-result-block is-error to be boolean, got ~S"
+             (claw-lisp.core.domain:tool-result-block-is-error block))
+    (%assert (eq t (claw-lisp.core.domain:tool-result-block-is-error block))
+             "Expected tool-result-block is-error to be T for error result")))
+
 (defun test-default-state-root-bootstrap-copies-legacy-tree ()
   (let* ((temp-root (merge-pathnames
                      (format nil "achatina-bootstrap-copy-~D-~D/"
@@ -2677,8 +2701,8 @@
                                           "--event-file" (namestring event-file))
                                     :stdout stream
                                     :stderr err)))))))
-           (%assert (= 10 exit-code)
-                    "Expected failed json-run tool event exit code 10, got ~A" exit-code)
+           (%assert (= 0 exit-code)
+                    "Expected graceful json-run tool failure exit code 0, got ~A" exit-code)
            (%assert (string= "" stdout)
                     "Expected no stdout when result-file is used, got ~S" stdout)
            (%assert (string= "" stderr)
@@ -2688,8 +2712,8 @@
                   (events (mapcar #'claw-lisp.providers.http-utils:json-decode
                                   (read-lines event-file)))
                   (event-types (mapcar (lambda (event) (getf event :event_type)) events)))
-             (%assert (string= "failed" (getf result :status))
-                      "Expected failed tool-event result, got ~S" result)
+             (%assert (string= "succeeded" (getf result :status))
+                      "Expected graceful tool-event result, got ~S" result)
              (%assert (member "tool.started" event-types :test #'string=)
                       "Expected tool.started event, got ~S" event-types)
              (%assert (member "tool.failed" event-types :test #'string=)
@@ -5904,6 +5928,8 @@
   (test-openrouter-error-response-extraction)
   (test-transcript-path-for-session)
   (test-default-state-root-family)
+  (test-tool-result-error-p-returns-boolean)
+  (test-make-tool-result-message-normalizes-error-flag-to-boolean)
   (test-default-state-root-bootstrap-copies-legacy-tree)
   (test-state-root-override-derives-family)
   (test-resume-session-falls-back-to-legacy-transcript-root)
