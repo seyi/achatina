@@ -9,6 +9,10 @@ You need:
 - Docker
 - optional: `sudo docker` access on hosts where Docker requires privilege
 
+You may still see `claw-lisp` in internal system names, CLI/runtime output,
+and local state paths such as `.claw-lisp/`. Those names are retained
+implementation identifiers inside Achatina rather than a separate product.
+
 ## Build the Development Image
 
 ```bash

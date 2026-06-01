@@ -1,7 +1,8 @@
 # Achatina
 
-Achatina is a locally runnable coding-agent runtime built around explicit IR
-stages, inspectable execution plans, and CAS-backed artifacts.
+Achatina is a locally runnable coding-agent runtime for single-agent execution,
+built around explicit IR stages, inspectable execution plans, and CAS-backed
+artifacts.
 
 It is designed to turn authored behavior into validated staged
 representations, lower them into deterministic execution plans, and execute
@@ -9,12 +10,18 @@ those plans through a local runtime you can actually inspect.
 
 ## What Achatina Provides
 
-- a locally runnable coding-agent runtime
+- a locally runnable single-agent coding runtime
 - surface-form compilation into semantic IR
 - staged validation and optimization
 - inspectable deterministic execution-plan lowering
 - CAS-backed artifact persistence and provenance
 - local execution of the current public runtime subset
+
+## Naming Note
+
+Some internal identifiers, CLI/runtime output, and local state paths still use
+`claw-lisp` naming for implementation continuity. In the public repo, those
+names refer to Achatina internals rather than a separate product.
 
 ## Core Pipeline
 
