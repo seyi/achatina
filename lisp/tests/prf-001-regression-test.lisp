@@ -16,39 +16,43 @@
 ;;;   Turn 3: Text response confirming completion (verify → complete)
 
 (defclass coding-task-provider (claw-lisp.core.protocols:provider)
-  ((call-count :initform 0 :accessor coding-task-provider-call-count)))
+  ((call-count :initform 0 :accessor coding-task-provider-call-count)
+   (fixture-root :initarg :fixture-root :reader coding-task-provider-fixture-root)))
 
 (defmethod claw-lisp.core.protocols:send-turn
     ((provider coding-task-provider) conversation &key model tools system)
   (declare (ignore conversation model tools system))
   (incf (coding-task-provider-call-count provider))
-  (case (coding-task-provider-call-count provider)
-    ;; Turn 1: inspect — read a file
-    (1 (claw-lisp.core.domain:make-transport-response
-        :ok-p t :status 200
-        :assistant-text ""
-        :raw-response "{}"
-        :provider "coding-task"
-        :tool-calls (list (list :id "toolu_read_01"
-                                :name "file-read"
-                                :input (list :path "/tmp/test.txt")))))
-    ;; Turn 2: edit — write a file
-    (2 (claw-lisp.core.domain:make-transport-response
-        :ok-p t :status 200
-        :assistant-text ""
-        :raw-response "{}"
-        :provider "coding-task"
-        :tool-calls (list (list :id "toolu_write_01"
-                                :name "file-write"
-                                :input (list :path "/tmp/test-out.txt"
-                                             :content "fixed code")))))
-    ;; Turn 3: completion text (no tools)
-    (t (claw-lisp.core.domain:make-transport-response
-        :ok-p t :status 200
-        :assistant-text "I have completed the coding task. The file has been updated."
-        :raw-response "{}"
-        :provider "coding-task"
-        :tool-calls nil))))
+  (let ((root (coding-task-provider-fixture-root provider)))
+    (case (coding-task-provider-call-count provider)
+      ;; Turn 1: inspect — read a file
+      (1 (claw-lisp.core.domain:make-transport-response
+          :ok-p t :status 200
+          :assistant-text ""
+          :raw-response "{}"
+          :provider "coding-task"
+          :tool-calls (list (list :id "toolu_read_01"
+                                  :name "file-read"
+                                  :input (list :path (namestring
+                                                      (merge-pathnames "test.txt" root)))))))
+      ;; Turn 2: edit — write a file
+      (2 (claw-lisp.core.domain:make-transport-response
+          :ok-p t :status 200
+          :assistant-text ""
+          :raw-response "{}"
+          :provider "coding-task"
+          :tool-calls (list (list :id "toolu_write_01"
+                                  :name "file-write"
+                                  :input (list :path (namestring
+                                                      (merge-pathnames "test-out.txt" root))
+                                               :content "fixed code")))))
+      ;; Turn 3: completion text (no tools)
+      (t (claw-lisp.core.domain:make-transport-response
+          :ok-p t :status 200
+          :assistant-text "I have completed the coding task. The file has been updated."
+          :raw-response "{}"
+          :provider "coding-task"
+          :tool-calls nil)))))
 
 (defmethod claw-lisp.core.protocols:stream-turn
     ((provider coding-task-provider) conversation &key model tools on-event system)
@@ -94,7 +98,9 @@
          (progn
            (claw-lisp.core.runtime:register-provider
             runtime
-            (make-instance 'coding-task-provider :name "coding-task"))
+            (make-instance 'coding-task-provider
+                           :name "coding-task"
+                           :fixture-root root))
            ;; Register tools that the provider will call
            (register-tool runtime (make-instance 'claw-lisp.tools.file-read::file-read-tool
                                                  :name "file-read"
@@ -103,9 +109,10 @@
                                                  :name "file-write"
                                                  :description "Write file"))
 
-           ;; Create test file for file-read to find
-           (ensure-directories-exist (merge-pathnames "test.txt" #P"/tmp/"))
-           (with-open-file (s "/tmp/test.txt" :direction :output :if-exists :supersede)
+           ;; Create test fixture under isolated root
+           (ensure-directories-exist root)
+           (with-open-file (s (merge-pathnames "test.txt" root)
+                            :direction :output :if-exists :supersede)
              (write-string "original code" s))
 
            (let* ((session (start-session runtime
