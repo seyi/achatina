@@ -139,15 +139,75 @@
                "Session should remain in :inspect")
       (format t "  ✓ apply-progression-policy no-op when below threshold~%"))))
 
+(defun test-no-recommendation-with-nil-tool-calls ()
+  (let ((runtime (%make-test-runtime-for-progression))
+        (session (%make-test-session)))
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    ;; Exceed stagnation threshold
+    (dotimes (i (+ claw-lisp.core.phase-progression:+read-only-stagnation-threshold+ 2))
+      (claw-lisp.core.phases:increment-phase-counter session :inspect))
+    ;; With nil tool-calls, should NOT recommend despite stagnation
+    (multiple-value-bind (phase reason)
+        (claw-lisp.core.phase-progression:recommend-phase-transition
+         session nil runtime)
+      (%assert (null phase) "Should not recommend with nil tool-calls")
+      (%assert (null reason) "Reason should be nil")
+      (format t "  ✓ no recommendation with nil tool-calls (permissive)~%"))))
+
+(defun test-classify-nil-tool-calls ()
+  (let ((runtime (%make-test-runtime-for-progression)))
+    (%assert (null (claw-lisp.core.phase-progression:classify-tool-calls-for-phase
+                    nil runtime))
+             "nil tool-calls should classify as nil")
+    (%assert (null (claw-lisp.core.phase-progression:classify-tool-calls-for-phase
+                    '() runtime))
+             "Empty tool-calls should classify as nil")
+    (format t "  ✓ classify nil/empty tool-calls returns nil~%")))
+
+(defun test-classify-dual-phase-tool ()
+  "file-read is valid in inspect+edit+verify but is classified by its envelope
+   predicate as read-only (not by its valid-phases list)."
+  (let ((runtime (%make-test-runtime-for-progression))
+        (tool-calls '((:name "file-read" :id "t1" :input nil))))
+    (let ((result (claw-lisp.core.phase-progression:classify-tool-calls-for-phase
+                   tool-calls runtime)))
+      (%assert (eq :read-only result)
+               "file-read should classify as :read-only via envelope predicate, got ~A" result)
+      (format t "  ✓ dual-phase tool classified by envelope predicate (read-only)~%"))))
+
+(defun test-apply-progression-returns-three-nils-on-invalid ()
+  (let ((runtime (%make-test-runtime-for-progression))
+        (session (%make-test-session))
+        (tool-calls '((:name "file-read" :id "t1" :input nil))))
+    ;; Put session in :complete (no valid transitions from :complete)
+    (claw-lisp.core.phases:transition-phase session :inspect "s")
+    (claw-lisp.core.phases:transition-phase session :edit "e")
+    (claw-lisp.core.phases:transition-phase session :verify "v")
+    (claw-lisp.core.phases:transition-phase session :complete "c")
+    ;; Artificially set counters high to trigger recommendation
+    (dotimes (i 10)
+      (claw-lisp.core.phases:increment-phase-counter session :inspect))
+    (multiple-value-bind (transitioned new-phase reason)
+        (claw-lisp.core.phase-progression:apply-progression-policy
+         session tool-calls runtime nil)
+      (%assert (null transitioned) "Should not transition from :complete")
+      (%assert (null new-phase) "New phase should be nil")
+      (%assert (null reason) "Reason should be nil")
+      (format t "  ✓ apply-progression-policy returns three nils on invalid transition~%"))))
+
 (defun run-phase-progression-tests ()
   (format t "~%=== PHZ-003/004 Phase Progression Tests ===~%~%")
   (test-classify-read-only-tools)
   (test-classify-mutation-tools)
   (test-classify-mixed-tools)
+  (test-classify-nil-tool-calls)
+  (test-classify-dual-phase-tool)
   (test-recommend-edit-on-mutation-in-inspect)
   (test-recommend-edit-on-stagnation)
   (test-no-recommendation-below-threshold)
+  (test-no-recommendation-with-nil-tool-calls)
   (test-recommend-verify-after-edit-stagnation)
   (test-apply-progression-policy-transitions)
   (test-apply-progression-policy-no-op)
+  (test-apply-progression-returns-three-nils-on-invalid)
   (format t "~%=== All PHZ-003/004 Tests Passed! ===~%"))

@@ -23,28 +23,29 @@
 
 (defun classify-tool-calls-for-phase (tool-calls runtime)
   "Classify TOOL-CALLS as :read-only, :mutation, or :mixed.
-   Uses the tool-phases protocol to determine tool categories."
+   Uses tool-envelope predicates to determine if a tool is read-only
+   or a mutation. Tools in neither category are ignored.
+   Returns nil if TOOL-CALLS is empty or no tools are classifiable."
+  (declare (ignore runtime))
+  (when (null tool-calls)
+    (return-from classify-tool-calls-for-phase nil))
   (let ((has-read nil)
         (has-write nil))
     (dolist (tool-call tool-calls)
       (let* ((tool-name (getf tool-call :name))
-             (tool (claw-lisp.core.runtime:resolve-tool runtime tool-name)))
-        (when tool
-          (let ((phases (claw-lisp.core.tool-phases:tool-valid-phases tool)))
-            (cond
-              ((and (member :inspect phases)
-                    (not (member :edit phases :test
-                                 (lambda (a b) (and (eq a :edit) (eq b :edit))))))
-               (setf has-read t))
-              ((and (member :edit phases)
-                    (not (member :inspect phases)))
-               (setf has-write t))
-              (t
-               (setf has-read t)))))))
+             (probe (claw-lisp.core.tool-envelope:wrap-tool-success tool-name "")))
+        (cond
+          ((claw-lisp.core.tool-envelope:envelope-is-mutation-p probe)
+           (setf has-write t))
+          ((claw-lisp.core.tool-envelope:envelope-is-read-only-p probe)
+           (setf has-read t))
+          ;; Unknown category (shell-command, echo) → treat as read for stagnation
+          (t (setf has-read t)))))
     (cond
       ((and has-read has-write) :mixed)
       (has-write :mutation)
-      (t :read-only))))
+      (has-read :read-only)
+      (t nil))))
 
 (defun recommend-phase-transition (session tool-calls runtime)
   "Analyze SESSION state and TOOL-CALLS to recommend a phase transition.
@@ -54,14 +55,18 @@
 
    Policy rules:
    1. If in :inspect and tools include mutations → recommend :edit
-   2. If in :inspect and read-only count exceeds threshold → recommend :edit
-   3. If in :edit and no mutations in this round → recommend :verify
-   4. Otherwise → no recommendation"
+   2. If in :inspect with tools and read-only count exceeds threshold → nudge :edit
+   3. If in :edit with read-only tools and edit count exceeds threshold → nudge :verify
+   4. No recommendation when tool-calls is nil or empty"
   (let* ((current-phase (claw-lisp.core.phases:get-current-phase session))
          (inspect-count (claw-lisp.core.phases:get-phase-counter session :inspect))
          (edit-count (claw-lisp.core.phases:get-phase-counter session :edit))
-         (tool-class (when tool-calls
-                       (classify-tool-calls-for-phase tool-calls runtime))))
+         (tool-class (classify-tool-calls-for-phase tool-calls runtime)))
+
+    ;; No tools → no recommendation (permissive)
+    (when (null tool-class)
+      (return-from recommend-phase-transition (values nil nil)))
+
     (cond
       ;; In :inspect with mutation tools → advance to :edit
       ((and (eq current-phase :inspect)
@@ -73,12 +78,13 @@
             (eq tool-class :mixed))
        (values :edit "mixed-tools-in-inspect"))
 
-      ;; In :inspect too long → nudge to :edit
+      ;; In :inspect too long with read-only tools → nudge to :edit
       ((and (eq current-phase :inspect)
+            (eq tool-class :read-only)
             (>= inspect-count +read-only-stagnation-threshold+))
        (values :edit "read-only-stagnation"))
 
-      ;; In :edit with only read-only tools → advance to :verify
+      ;; In :edit with only read-only tools and stagnating → advance to :verify
       ((and (eq current-phase :edit)
             (eq tool-class :read-only)
             (>= edit-count +edit-without-verify-threshold+))
@@ -113,10 +119,13 @@
    Returns (values transitioned-p new-phase reason) or (values nil nil nil)."
   (multiple-value-bind (recommended-phase reason)
       (recommend-phase-transition session tool-calls runtime)
-    (when recommended-phase
-      (let ((current-phase (claw-lisp.core.phases:get-current-phase session)))
-        (when (claw-lisp.core.phases:valid-transition-p current-phase recommended-phase)
+    (if (and recommended-phase
+             (claw-lisp.core.phases:valid-transition-p
+              (claw-lisp.core.phases:get-current-phase session)
+              recommended-phase))
+        (let ((current-phase (claw-lisp.core.phases:get-current-phase session)))
           (claw-lisp.core.phases:transition-phase session recommended-phase reason)
           (emit-phase-transition-event session transcript-path
                                        current-phase recommended-phase reason)
-          (values t recommended-phase reason))))))
+          (values t recommended-phase reason))
+        (values nil nil nil))))
