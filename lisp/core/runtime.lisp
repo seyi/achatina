@@ -781,16 +781,21 @@ takes precedence over this generated ID."
           tool-name
           (1+ (length (claw-lisp.core.domain:conversation-tool-results conversation)))))
 
-(defun provider-tool-descriptors (runtime)
-  "Return a full tool descriptor list for provider tool-call requests.
+(defun provider-tool-descriptors (runtime &key exclude-names)
+  "Return a tool descriptor list for provider tool-call requests.
 
-Each descriptor includes :name, :description, and :input_schema (JSON Schema)."
-  (mapcar (lambda (tool-name)
-            (let ((tool (resolve-tool runtime tool-name)))
-              (list :name tool-name
-                    :description (claw-lisp.core.protocols:tool-description tool)
-                    :input_schema (claw-lisp.core.protocols:tool-input-schema tool))))
-          (list-tool-names runtime)))
+Each descriptor includes :name, :description, and :input_schema (JSON Schema).
+When EXCLUDE-NAMES is provided, tools with those names are omitted."
+  (let ((names (if exclude-names
+                   (remove-if (lambda (n) (member n exclude-names :test #'string=))
+                              (list-tool-names runtime))
+                   (list-tool-names runtime))))
+    (mapcar (lambda (tool-name)
+              (let ((tool (resolve-tool runtime tool-name)))
+                (list :name tool-name
+                      :description (claw-lisp.core.protocols:tool-description tool)
+                      :input_schema (claw-lisp.core.protocols:tool-input-schema tool))))
+            names)))
 
 (defun response-tool-calls (response)
   "Return provider-requested tool calls from RESPONSE.
@@ -973,8 +978,12 @@ that starts with '[' and contains 'error' or 'timed out'."
              do
                 (let* ((supports-tools (model-supports-p (runtime-model-registry runtime)
                                                          model :tools))
+                       (stagnant-count (session-state-value session :read-only-tool-loop-repeat-count 0))
                        (tools (when supports-tools
-                                (provider-tool-descriptors runtime)))
+                                (provider-tool-descriptors
+                                 runtime
+                                 :exclude-names (when (>= stagnant-count +read-only-tool-loop-nudge-threshold+)
+                                                  +read-only-tool-names+))))
                        (_ (maybe-idle-gap-microcompact runtime session model
                                                        :system-prompt system-prompt
                                                        :tool-definitions tools))
