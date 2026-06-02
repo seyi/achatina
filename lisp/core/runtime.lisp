@@ -1191,45 +1191,61 @@ tool results."
       (error "Unknown tool: ~A" tool-name))
     ;; Phase compatibility check (FND-004 / PHZ-002)
     (claw-lisp.core.tool-phases:check-tool-phase-compatibility tool session)
-    (handler-case
-        (let* ((validated (claw-lisp.core.protocols:validate-tool-input tool input))
-               (authorized (progn
-                             (setf validated-input validated)
-                             (authorize-tool-input runtime tool-name validated))))
-          (setf authorized-input authorized
-                call (make-tool-call :id effective-call-id
-                                     :name tool-name
-                                     :input authorized))
-          (maybe-append-transcript-event
-           session
-           transcript-path
-           (list :event "tool_start"
-                 :session_id (claw-lisp.core.domain:agent-session-id session)
-                 :call_id (claw-lisp.core.domain:tool-call-id call)
-                 :tool_name tool-name
-                 :input authorized-input))
-          (let ((raw-result (execute-tool tool authorized-input runtime)))
-            (setf normalized-result (normalize-tool-result tool raw-result))))
-      (error (condition)
-        (maybe-append-transcript-event
-         session
-         transcript-path
-         (append (list :event "tool_error"
-                       :session_id (claw-lisp.core.domain:agent-session-id session)
-                       :call_id effective-call-id
-                       :tool_name tool-name
-                       :error (cond
-                                (authorized-input
-                                 (princ-to-string condition))
-                                (validated-input
-                                 (format nil "Tool ~A request rejected before execution."
-                                         tool-name))
-                                (t
-                                 (format nil "Tool ~A input validation failed before execution."
-                                         tool-name))))
-                 (when authorized-input
-                   (list :input authorized-input))))
-        (error condition)))
+    (let ((execution-start-time (get-internal-real-time)))
+      (handler-case
+          (let* ((validated (claw-lisp.core.protocols:validate-tool-input tool input))
+                 (authorized (progn
+                               (setf validated-input validated)
+                               (authorize-tool-input runtime tool-name validated))))
+            (setf authorized-input authorized
+                  call (make-tool-call :id effective-call-id
+                                       :name tool-name
+                                       :input authorized))
+            (maybe-append-transcript-event
+             session
+             transcript-path
+             (list :event "tool_start"
+                   :session_id (claw-lisp.core.domain:agent-session-id session)
+                   :call_id (claw-lisp.core.domain:tool-call-id call)
+                   :tool_name tool-name
+                   :input authorized-input))
+            (let ((raw-result (execute-tool tool authorized-input runtime)))
+              (setf normalized-result (normalize-tool-result tool raw-result))
+              ;; TCT-003: Validate tool result before storage
+              (unless (and normalized-result
+                           (stringp (claw-lisp.core.domain:tool-result-content normalized-result)))
+                (setf normalized-result
+                      (claw-lisp.core.domain:make-tool-result
+                       :call-id effective-call-id
+                       :tool-name tool-name
+                       :content (if normalized-result
+                                    (format nil "~A" (claw-lisp.core.domain:tool-result-content normalized-result))
+                                    ""))))))
+        (error (condition)
+          (let ((duration-ms (/ (- (get-internal-real-time) execution-start-time)
+                                (/ internal-time-units-per-second 1000.0)))
+                (error-type (claw-lisp.core.tool-envelope:classify-tool-error condition)))
+            (maybe-append-transcript-event
+             session
+             transcript-path
+             (append (list :event "tool_error"
+                           :session_id (claw-lisp.core.domain:agent-session-id session)
+                           :call_id effective-call-id
+                           :tool_name tool-name
+                           :error_type (string-downcase (symbol-name error-type))
+                           :duration_ms (round duration-ms)
+                           :error (cond
+                                    (authorized-input
+                                     (princ-to-string condition))
+                                    (validated-input
+                                     (format nil "Tool ~A request rejected before execution."
+                                             tool-name))
+                                    (t
+                                     (format nil "Tool ~A input validation failed before execution."
+                                             tool-name))))
+                     (when authorized-input
+                       (list :input authorized-input)))))
+          (error condition)))
     (let* ((cas-result
              (multiple-value-bind (stored artifact)
                  (store-session-tool-result-cas
@@ -1275,18 +1291,22 @@ tool results."
                  (claw-lisp.config:runtime-config-microcompact-keep-recent-tool-results
                   (runtime-settings runtime))))))
       (update-session-memory (runtime-settings runtime) session)
-      (maybe-append-transcript-event
-       session
-       transcript-path
-       (list :event "tool_result"
-             :session_id (claw-lisp.core.domain:agent-session-id session)
-             :call_id (claw-lisp.core.domain:tool-call-id call)
-             :tool_name tool-name
-             :input authorized-input
-             :result (append (tool-result->plist result)
-                             (list :is_error (and (tool-result-error-p result) t)))))
+      (let ((duration-ms (/ (- (get-internal-real-time) execution-start-time)
+                            (/ internal-time-units-per-second 1000.0))))
+        (maybe-append-transcript-event
+         session
+         transcript-path
+         (list :event "tool_result"
+               :session_id (claw-lisp.core.domain:agent-session-id session)
+               :call_id (claw-lisp.core.domain:tool-call-id call)
+               :tool_name tool-name
+               :input authorized-input
+               :duration_ms (round duration-ms)
+               :size_bytes (claw-lisp.core.domain:tool-result-bytes result)
+               :result (append (tool-result->plist result)
+                               (list :is_error (and (tool-result-error-p result) t))))))
       (maybe-extract-durable-memory runtime session)
-      result)))
+      result))))
 
 (defun start-session (runtime &key provider-name model session-id)
   "Create a baseline agent session. No provider traffic is sent here."
