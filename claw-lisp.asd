@@ -43,6 +43,7 @@
    (:file "lisp/core/model-registry")
    (:file "lisp/core/compact")
    (:file "lisp/core/conditions")
+   (:file "lisp/core/phases")
    (:file "lisp/core/claude-md")
    (:file "lisp/core/system-prompt")
    (:file "lisp/providers/rate-limit")

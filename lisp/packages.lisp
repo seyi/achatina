@@ -1634,7 +1634,46 @@
    #:child-supervisor-restart-limit-error-max-restarts
    #:config-error
    #:config-error-path
+   ;; Phase errors (coding CLI)
+   #:invalid-phase-transition
+   #:invalid-phase-transition-from
+   #:invalid-phase-transition-to
+   #:phase-violation-error
+   #:phase-violation-tool
+   #:phase-violation-current-phase
+   #:phase-violation-valid-phases
    #:http-status->error-type))
+
+(defpackage #:claw-lisp.core.phases
+  (:use #:cl)
+  (:export
+   ;; Phase state accessors
+   #:get-current-phase
+   #:get-phase-history
+   #:get-phase-counter
+   #:get-phase-started-at
+   #:get-turn-count
+   #:get-last-verify-result
+   #:get-last-turn-tool-count
+   ;; Phase state mutators
+   #:set-session-state-value
+   #:increment-phase-counter
+   #:increment-turn-count
+   #:set-last-turn-tool-count
+   #:set-last-verify-result
+   ;; Phase transition
+   #:valid-transition-p
+   #:validate-transition
+   #:transition-phase
+   ;; Phase queries
+   #:phase-duration-seconds
+   #:phase-transition-count
+   #:in-phase-p
+   #:has-entered-phase-p
+   ;; Initialization
+   #:initialize-phase-state
+   ;; Summary
+   #:phase-summary))
 
 (defpackage #:claw-lisp.core.agent-mailbox
   (:use #:cl)

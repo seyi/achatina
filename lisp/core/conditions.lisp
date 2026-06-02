@@ -126,6 +126,26 @@
                      (child-supervisor-restart-limit-error-restart-count condition)
                      (child-supervisor-restart-limit-error-max-restarts condition)))))
 
+;; --- Phase Errors (Coding CLI) ---
+
+(define-condition invalid-phase-transition (claw-error)
+  ((from :initarg :from :reader invalid-phase-transition-from)
+   (to :initarg :to :reader invalid-phase-transition-to))
+  (:report (lambda (condition stream)
+             (format stream "Invalid phase transition from ~A to ~A"
+                     (invalid-phase-transition-from condition)
+                     (invalid-phase-transition-to condition)))))
+
+(define-condition phase-violation-error (claw-error)
+  ((tool-name :initarg :tool :reader phase-violation-tool)
+   (current-phase :initarg :current-phase :reader phase-violation-current-phase)
+   (valid-phases :initarg :valid-phases :reader phase-violation-valid-phases))
+  (:report (lambda (condition stream)
+             (format stream "Tool ~A not valid for phase ~A (valid phases: ~{~A~^, ~})"
+                     (phase-violation-tool condition)
+                     (phase-violation-current-phase condition)
+                     (phase-violation-valid-phases condition)))))
+
 ;; --- Helper: classify HTTP status to condition type ---
 
 (defun http-status->error-type (status)

@@ -403,6 +403,14 @@
   provider
   (model "" :type string)
   conversation
+  ;; STATE is a plist that may include phase-tracking keys:
+  ;;   :current-phase       - keyword: :inspect | :edit | :verify | :complete
+  ;;   :phase-history       - list of (:phase <phase> :timestamp <ts> :trigger <reason>)
+  ;;   :phase-counters      - plist: (:inspect 3 :edit 1 :verify 0 :complete 0)
+  ;;   :phase-started-at    - universal time when current phase started
+  ;;   :last-verify-result  - boolean: T if last verify step passed
+  ;;   :last-turn-tool-count - integer: number of tools called in last turn
+  ;;   :turn-count          - integer: total turns in session
   state)
 
 ;;; ============================================================
