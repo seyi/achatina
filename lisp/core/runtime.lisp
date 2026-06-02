@@ -70,10 +70,10 @@
   "Bound the baseline provider tool loop to avoid infinite local retries.")
 
 (defparameter +max-stagnant-read-only-tool-iterations+ 2
-  "Maximum repeated identical read-only tool-call iterations before the runtime fails closed.")
+  "Maximum consecutive read-only tool-call turns before the runtime fails closed.")
 
 (defparameter +read-only-tool-loop-nudge-threshold+ 2
-  "Repeated identical read-only tool-call count that triggers a progression nudge.")
+  "Consecutive read-only tool-call turn count that triggers a progression nudge.")
 
 (defparameter +read-only-tool-names+ '("file-read" "glob" "grep")
   "Tool names treated as read-only for stagnant loop detection.")
@@ -912,19 +912,19 @@ that starts with '[' and contains 'error' or 'timed out'."
   (member (getf tool-call :name) +read-only-tool-names+ :test #'string=))
 
 (defun check-for-stagnant-read-only-tool-loop (session tool-calls)
-  "Track repeated identical read-only tool-call batches and fail closed on stagnation."
+  "Track consecutive read-only tool-call turns and fail closed on stagnation.
+
+   Counts any turn where every tool call is read-only, regardless of which
+   files were read. This catches the common case where a model reads different
+   files each turn but never transitions to a write or test action."
   (if (and tool-calls
            (every #'read-only-tool-call-p tool-calls))
       (let* ((signature (mapcar #'tool-call-signature tool-calls))
-             (previous (session-state-value session :last-read-only-tool-call-signature nil))
              (repeat-count (session-state-value session :read-only-tool-loop-repeat-count 0))
              (nudge-signature (session-state-value session :last-read-only-tool-loop-nudge-signature nil))
-             (new-count (if (equal signature previous)
-                            (1+ repeat-count)
-                            1))
+             (new-count (1+ repeat-count))
              (nudge-needed-p (and (>= new-count +read-only-tool-loop-nudge-threshold+)
                                   (not (equal signature nudge-signature)))))
-        (set-session-state-value session :last-read-only-tool-call-signature signature)
         (set-session-state-value session :read-only-tool-loop-repeat-count new-count)
         (when nudge-needed-p
           (set-session-state-value session
@@ -935,7 +935,6 @@ that starts with '[' and contains 'error' or 'timed out'."
                  (claw-lisp.core.domain:agent-session-id session)))
         (values new-count nudge-needed-p))
       (progn
-        (set-session-state-value session :last-read-only-tool-call-signature nil)
         (set-session-state-value session :read-only-tool-loop-repeat-count 0)
         (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
         (values 0 nil))))
