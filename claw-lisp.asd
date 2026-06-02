@@ -55,6 +55,8 @@
    (:file "lisp/providers/http-utils")
    (:file "lisp/providers/stream-accumulator")
    (:file "lisp/core/message-normalization")
+   (:file "lisp/core/agent-mailbox-stub")
+   (:file "lisp/core/agent-supervisor-stub")
    (:file "lisp/core/runtime")
    (:file "lisp/ir/local-execution")
    (:file "lisp/tools/echo")
