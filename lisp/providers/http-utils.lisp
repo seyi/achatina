@@ -298,23 +298,36 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->anthropic-block msg))))
-    (append (list
-             :model model
-             :max_tokens 1024
-             :messages messages)
-            (when tools
-              (list :tools tools)))))
+    (let ((body (list
+                 :model model
+                 :max_tokens 1024
+                 :messages messages)))
+      (when tools
+        (push (cons :tools tools) body))
+      body)))
+
+(defun %tool-descriptor-to-openai-format (descriptor)
+  "Convert internal tool descriptor plist to OpenAI function-calling format.
+   Input:  (:name \"x\" :description \"y\" :input_schema (:type \"object\" ...))
+   Output: (:type \"function\" :function (:name \"x\" :description \"y\" :parameters (:type \"object\" ...)))"
+  (list :type "function"
+        :function (list :name (getf descriptor :name)
+                        :description (getf descriptor :description)
+                        :parameters (getf descriptor :input_schema))))
 
 (defun conversation->chat-json (conversation model &key tools)
   "Render CONVERSATION into an OpenRouter/chat-completions JSON request body.
 
-   Returns a plist suitable for json-encode-string."
+   Returns a plist suitable for json-encode-string.
+   Tools are converted to OpenAI function-calling format."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
                 collect (message->chat-completion-block msg))))
-    (append (list :model model :messages messages)
-            (when tools
-              (list :tools tools)))))
+    (let ((body (list :model model :messages messages)))
+      (when tools
+        (setf (getf body :tools)
+              (mapcar #'%tool-descriptor-to-openai-format tools)))
+      body)))
 
 ;; --- Response Extraction (yason-based, no Python) ---
 
