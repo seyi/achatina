@@ -15,6 +15,13 @@
 ;;;   edit → verify | complete
 ;;;   verify → edit | complete (can retry edits)
 ;;;   complete → (terminal, no transitions)
+;;;
+;;; Phase history is bounded to the most recent transitions to prevent
+;;; unbounded memory growth in long-running sessions.
+
+(defconstant +max-phase-history-entries+ 50
+  "Maximum number of phase transitions to keep in history.
+   Older entries are dropped to prevent unbounded memory growth.")
 
 ;;; --- Phase State Accessors ---
 
@@ -108,39 +115,49 @@
 
    This is the main phase transition function. It:
    1. Validates the transition is legal
-   2. Records the transition in phase history
+   2. Records the transition in phase history (bounded to +max-phase-history-entries+)
    3. Updates the current phase
    4. Resets phase-specific state
    5. Returns the updated session
 
-   Signals INVALID-PHASE-TRANSITION error if transition is not allowed."
-  (let ((old-phase (get-current-phase session))
-        (timestamp (get-universal-time)))
+   Signals INVALID-PHASE-TRANSITION error if transition is not allowed.
+
+   Optimized to batch all state mutations into a single plist rebuild."
+  (let* ((old-phase (get-current-phase session))
+         (timestamp (get-universal-time))
+         (old-state (claw-lisp.core.domain:agent-session-state session)))
 
     ;; Validate transition
     (validate-transition old-phase new-phase)
 
-    ;; Record in phase history
-    (let ((history (get-phase-history session)))
-      (set-session-state-value session :phase-history
-        (cons (list :phase new-phase
-                    :from old-phase
-                    :timestamp timestamp
-                    :trigger reason)
-              history)))
+    ;; Build new state in one pass (avoiding multiple O(n) copies)
+    (let* ((old-history (getf old-state :phase-history))
+           (new-history-entry (list :phase new-phase
+                                    :from old-phase
+                                    :timestamp timestamp
+                                    :trigger reason))
+           ;; Bound history to max entries (keep most recent)
+           (new-history (let ((full-history (cons new-history-entry old-history)))
+                          (if (> (length full-history) +max-phase-history-entries+)
+                              (subseq full-history 0 +max-phase-history-entries+)
+                              full-history)))
+           (old-counters (getf old-state :phase-counters))
+           ;; Initialize counter for new phase if not present
+           (new-counters (if (getf old-counters new-phase)
+                            old-counters
+                            (list* new-phase 0 old-counters)))
+           ;; Build complete new state
+           (new-state (copy-list old-state)))
 
-    ;; Update current phase
-    (set-session-state-value session :current-phase new-phase)
-    (set-session-state-value session :phase-started-at timestamp)
+      ;; Update all fields in the copied state
+      (setf (getf new-state :phase-history) new-history)
+      (setf (getf new-state :current-phase) new-phase)
+      (setf (getf new-state :phase-started-at) timestamp)
+      (setf (getf new-state :phase-counters) new-counters)
 
-    ;; Initialize counter for this phase if not present
-    (unless (getf (getf (claw-lisp.core.domain:agent-session-state session) :phase-counters) new-phase)
-      (let* ((state (claw-lisp.core.domain:agent-session-state session))
-             (counters (getf state :phase-counters)))
-        (set-session-state-value session :phase-counters
-          (list* new-phase 0 counters))))
-
-    session))
+      ;; Single state replacement
+      (setf (claw-lisp.core.domain:agent-session-state session) new-state)
+      session)))
 
 ;;; --- Phase Queries ---
 

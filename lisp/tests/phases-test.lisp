@@ -192,3 +192,33 @@
       (is (eq :inspect (getf summary :current-phase)) "Current phase should be :inspect")
       (is (= 1 (getf summary :turn-count)) "Turn count should be 1")
       (is (= 1 (getf summary :inspect-tool-count)) "Inspect tool count should be 1"))))
+
+(def-test test-bounded-phase-history ()
+  "Test that phase history is bounded to prevent unbounded growth."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "test-session-007"
+                  :provider :mock
+                  :model "test-model"
+                  :conversation nil
+                  :state nil))
+        (max-entries claw-lisp.core.phases:+max-phase-history-entries+))
+
+    (claw-lisp.core.phases:initialize-phase-state session)
+
+    ;; Create more transitions than the max using valid transitions
+    ;; inspect -> edit -> verify -> edit -> verify -> ... -> complete
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (dotimes (i (+ max-entries 10))
+      (let ((current (claw-lisp.core.phases:get-current-phase session)))
+        (case current
+          (:inspect (claw-lisp.core.phases:transition-phase session :edit (format nil "transition-~A" i)))
+          (:edit (claw-lisp.core.phases:transition-phase session :verify (format nil "transition-~A" i)))
+          (:verify (if (< i (+ max-entries 8))
+                       (claw-lisp.core.phases:transition-phase session :edit (format nil "transition-~A" i))
+                       (claw-lisp.core.phases:transition-phase session :complete (format nil "transition-~A" i))))
+          (:complete (return)))))
+
+    ;; History should be capped at max
+    (let ((history (claw-lisp.core.phases:get-phase-history session)))
+      (is (<= (length history) max-entries)
+          "Phase history should not exceed max entries"))))

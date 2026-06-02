@@ -78,12 +78,15 @@
    #:dmq-config-semantic-weight-by-kind
    #:dmq-config-max-injection-chars
    #:dmq-config-injection-enabled
+   #:dmq-config-second-pass-enabled
    #:dmq-config-dedup-window-normal
    #:dmq-config-dedup-window-important
    #:dmq-config-importance-threshold
    #:dmq-config-evergreen-kinds
    #:dmq-config-embedding-failure-threshold
    #:dmq-config-embedding-cooldown-seconds
+   #:dmq-config-query-cache-ttl-seconds
+   #:dmq-config-query-cache-max-entries
    #:current-dmq-config
    #:*dmq-active-config*
    ;; Struct constructor
@@ -1116,6 +1119,61 @@
    #:verify-cas-ref-integrity
    #:verify-manifest-graph-integrity))
 
+(defpackage #:claw-lisp.cas.cross-cluster
+  (:use #:cl)
+  (:import-from #:claw-lisp.storage.cas
+                #:cas-delete
+                #:cas-get-bytes
+                #:cas-put-bytes
+                #:valid-versioned-hash-p)
+  (:import-from #:claw-lisp.storage.cas-ref
+                #:read-cas-ref
+                #:write-cas-ref)
+  (:import-from #:claw-lisp.cas.integrity
+                #:integrity-failure-actual
+                #:integrity-failure-context
+                #:integrity-failure-expected
+                #:integrity-failure-kind
+                #:integrity-report-failures
+                #:integrity-report-ok-p
+                #:verify-cas-object-integrity)
+  (:export
+   #:cas-cross-cluster-error
+   #:cas-cross-cluster-missing-source-object-error
+   #:cas-cross-cluster-missing-source-object-error-hash
+   #:cas-cross-cluster-missing-source-ref-error
+   #:cas-cross-cluster-missing-source-ref-error-name
+   #:cas-cross-cluster-destination-ref-conflict-error
+   #:cas-cross-cluster-destination-ref-conflict-error-name
+   #:cas-cross-cluster-destination-ref-conflict-error-expected
+   #:cas-cross-cluster-destination-ref-conflict-error-actual
+   #:cas-cross-cluster-invalid-hash-error
+   #:cas-cross-cluster-invalid-hash-error-hash
+   #:cas-cross-cluster-integrity-error
+   #:cas-cross-cluster-integrity-error-cause
+   #:cas-cross-cluster-copy-error
+   #:cas-cross-cluster-copy-error-hash
+   #:cas-cross-cluster-copy-error-actual
+   #:cross-cluster-failure
+   #:cross-cluster-failure-kind
+   #:cross-cluster-failure-subject
+   #:cross-cluster-failure-expected
+   #:cross-cluster-failure-actual
+   #:cross-cluster-failure-context
+   #:cross-cluster-report
+   #:cross-cluster-report-target-kind
+   #:cross-cluster-report-direction
+   #:cross-cluster-report-target
+   #:cross-cluster-report-copied-count
+   #:cross-cluster-report-skipped-count
+   #:cross-cluster-report-failures
+   #:cross-cluster-report-metadata
+   #:cross-cluster-report-failure-count
+   #:cross-cluster-report-ok-p
+   #:sync-cas-object
+   #:push-cas-ref
+   #:pull-cas-ref))
+
 (defpackage #:claw-lisp.storage.session-memory
   (:use #:cl)
   (:import-from #:claw-lisp.config
@@ -1285,10 +1343,13 @@
                 #:dmq-config-semantic-weight-by-kind
                 #:dmq-config-max-injection-chars
                 #:dmq-config-injection-enabled
+                #:dmq-config-second-pass-enabled
                 #:dmq-config-dedup-window-normal
                 #:dmq-config-dedup-window-important
                 #:dmq-config-importance-threshold
                 #:dmq-config-evergreen-kinds
+                #:dmq-config-query-cache-max-entries
+                #:dmq-config-query-cache-ttl-seconds
                 #:dmq-config-embedding-failure-threshold
                 #:dmq-config-embedding-cooldown-seconds)
   (:import-from #:claw-lisp.core.domain
@@ -1343,6 +1404,11 @@
    #:record-embedding-success
    #:record-embedding-failure
    #:filter-dedup-results
+   ;; Query cache (Task 6)
+   #:*dmq-query-cache*
+   #:clear-query-cache
+   #:cache-query-result
+   #:get-cached-query-result
    ;; Circuit breaker state (Task 6)
    #:*dmq-embedding-failures*
    #:*dmq-circuit-open-until*
@@ -1354,6 +1420,8 @@
    #:memory-injection-record-importance
    #:memory-injection-record-kind
    #:memory-injection-record-timestamp
+   #:turn-memory-injected-p
+   #:mark-turn-memory-injected
    #:record-memory-injection
    #:extract-query-text
    #:insert-memory-context-message
@@ -1362,6 +1430,64 @@
    #:*semantic-search-default-hybrid-weight*
    #:*semantic-search-kind-hybrid-weights*
    #:*default-search-kinds*))
+
+(defpackage #:claw-lisp.storage.durable-memory-consolidate
+  (:use #:cl)
+  (:import-from #:claw-lisp.storage.durable-memory
+                #:durable-memory-record
+                #:make-durable-memory-record
+                #:copy-durable-memory-record
+                #:durable-memory-record-id
+                #:durable-memory-record-kind
+                #:durable-memory-record-subject-id
+                #:durable-memory-record-title
+                #:durable-memory-record-content
+                #:durable-memory-record-source
+                #:durable-memory-record-created-universal-time
+                #:durable-memory-record-updated-universal-time
+                #:durable-memory-record-importance-score
+                #:durable-memory-record-staleness-score
+                #:durable-memory-record-last-accessed-universal-time
+                #:durable-memory-record-tags
+                #:durable-memory-record-version
+                #:durable-memory-record-supersedes-id
+                #:durable-memory-record-superseded-by-id
+                #:durable-memory-record-embedding
+                #:durable-memory-record-embedding-model
+                #:durable-memory-record-embedding-version
+                #:*durable-memory-embedding-index*
+                #:update-embedding-index
+                #:get-embedding-from-index
+                #:retrieve-record-embedding
+                #:load-durable-memories
+                #:save-durable-memory-record
+                #:update-durable-memory-record
+                #:delete-durable-memory-record)
+  (:import-from #:claw-lisp.storage.durable-memory-search
+                #:compute-cosine-similarity
+                #:compute-cosine-similarity-arrays
+                #:coerce-to-float-array)
+  (:import-from #:claw-lisp.config
+                #:*runtime-config*
+                #:runtime-config)
+  (:export
+   ;; Configuration parameters
+   #:*consolidation-default-threshold*
+   #:*consolidation-kind-thresholds*
+   #:*consolidation-default-strategy*
+   #:*consolidation-max-group-size*
+   #:*consolidation-max-per-run*
+   #:*consolidation-kind-policies*
+   ;; Policy resolution
+   #:resolve-consolidation-policy
+   ;; Predicates & utilities
+   #:record-superseded-p
+   ;; Near-duplicate finding
+   #:find-near-duplicate-memories
+   ;; Consolidation
+   #:consolidate-memories
+   ;; Auto-consolidation
+   #:auto-consolidate-durable-memory))
 
 (defpackage #:claw-lisp.storage.consolidation-lock
   (:use #:cl)
@@ -1421,6 +1547,18 @@
            #:normalize-messages-for-api
            #:normalize-conversation-for-anthropic
            #:validate-normalization-roundtrip))
+
+(defpackage #:claw-lisp.core.consolidate
+  (:use #:cl)
+  (:import-from #:claw-lisp.config
+                #:runtime-config-memory-root)
+  (:import-from #:claw-lisp.storage.consolidation-lock
+                #:with-consolidation-lock)
+  (:import-from #:claw-lisp.storage.durable-memory
+                #:durable-memory-index-path
+                #:update-durable-memory-index)
+  (:export
+   #:consolidate-durable-memory))
 
 (defpackage #:claw-lisp.core.microcompact
   (:use #:cl)
@@ -1647,6 +1785,8 @@
 (defpackage #:claw-lisp.core.phases
   (:use #:cl)
   (:export
+   ;; Constants
+   #:+max-phase-history-entries+
    ;; Phase state accessors
    #:get-current-phase
    #:get-phase-history
@@ -1825,6 +1965,8 @@
   (:import-from #:claw-lisp.storage.durable-memory
                 #:durable-memory-note-path
                 #:extract-durable-memory)
+  (:import-from #:claw-lisp.core.consolidate
+                #:consolidate-durable-memory)
   (:import-from #:claw-lisp.core.microcompact
                 #:enforce-tool-result-aggregate-budget
                 #:microcompact-conversation-tool-results)
@@ -1882,6 +2024,7 @@
    #:compaction-circuit-open-p
    #:compact-session
    #:compact-session-with-session-memory
+   #:consolidate-durable-memory-store
    #:durable-memory-path-for-session
    #:extract-session-durable-memory
    #:session-memory-path-for-session
@@ -2453,6 +2596,7 @@
            #:run-durable-memory-scoring-tests
            #:run-durable-memory-tests
            #:run-durable-memory-e2e-test
+           #:run-consolidate-tests
            #:run-durable-memory-query-tests
            #:run-durable-memory-runtime-integration-tests
            ;; Phase 7 E2E fixtures
@@ -2464,7 +2608,8 @@
            #:run-phase7-multi-session-tests
            #:run-phase7-performance-tests
            #:run-cas-tests
-           #:run-cas-integrity-tests))
+           #:run-cas-integrity-tests
+           #:run-cas-cross-cluster-tests))
 
 (defpackage #:claw-lisp.cli
   (:use #:cl)

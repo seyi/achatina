@@ -158,5 +158,34 @@
     (assert (= 1 (getf summary :inspect-tool-count)) nil "Inspect tool count should be 1")
     (format t "  ✓ Phase summary complete and accurate~%")))
 
+;; Test 7: Bounded history
+(format t "~%Test 7: Bounded phase history...~%")
+(let ((session (claw-lisp.core.domain:make-agent-session
+                :id "test-007"
+                :provider :mock
+                :model "test-model"
+                :conversation nil
+                :state nil))
+      (max-entries claw-lisp.core.phases:+max-phase-history-entries+))
+  (initialize-phase-state session)
+
+  ;; Create more transitions than max, cycling through valid transitions
+  ;; inspect -> edit -> verify -> edit -> verify -> ... -> complete
+  (transition-phase session :inspect "start")
+  (dotimes (i (+ max-entries 10))
+    (let ((current (get-current-phase session)))
+      (case current
+        (:inspect (transition-phase session :edit (format nil "transition-~A" i)))
+        (:edit (transition-phase session :verify (format nil "transition-~A" i)))
+        (:verify (if (< i (+ max-entries 8))
+                     (transition-phase session :edit (format nil "transition-~A" i))
+                     (transition-phase session :complete (format nil "transition-~A" i))))
+        (:complete (return)))))
+
+  (let ((history (get-phase-history session)))
+    (assert (<= (length history) max-entries) nil "History should be bounded")
+    (format t "  ✓ Phase history bounded to max ~A entries (actual: ~A)~%"
+            max-entries (length history))))
+
 (format t "~%~%=== All FND-001 Tests Passed! ===~%~%")
 (uiop:quit 0)
