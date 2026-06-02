@@ -1830,6 +1830,33 @@
    #:check-completion-triggers
    #:maybe-auto-complete))
 
+(defpackage #:claw-lisp.core.tool-envelope
+  (:use #:cl)
+  (:export
+   ;; Struct and constructor
+   #:tool-envelope
+   #:make-tool-envelope
+   #:tool-envelope-success
+   #:tool-envelope-tool-name
+   #:tool-envelope-content
+   #:tool-envelope-error-type
+   #:tool-envelope-error-message
+   #:tool-envelope-is-error
+   #:tool-envelope-duration-ms
+   #:tool-envelope-timestamp
+   #:tool-envelope-phase-at-execution
+   ;; Error classification
+   #:classify-tool-error
+   ;; Envelope construction
+   #:wrap-tool-success
+   #:wrap-tool-failure
+   #:envelope-from-tool-result
+   ;; Queries
+   #:envelope-succeeded-p
+   #:envelope-failed-p
+   #:envelope-is-read-only-p
+   #:envelope-is-mutation-p))
+
 (defpackage #:claw-lisp.core.agent-mailbox
   (:use #:cl)
   (:import-from #:claw-lisp.core.domain

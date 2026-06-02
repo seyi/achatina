@@ -45,6 +45,7 @@
    (:file "lisp/core/conditions")
    (:file "lisp/core/phases")
    (:file "lisp/core/completion")
+   (:file "lisp/core/tool-envelope")
    (:file "lisp/core/claude-md")
    (:file "lisp/core/system-prompt")
    (:file "lisp/providers/rate-limit")
