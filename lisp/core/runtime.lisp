@@ -66,8 +66,17 @@
 (defparameter +compaction-failure-limit+ 3
   "Maximum consecutive compaction failures before the baseline circuit opens.")
 
-(defparameter +max-provider-tool-iterations+ 4
+(defparameter +max-provider-tool-iterations+ 6
   "Bound the baseline provider tool loop to avoid infinite local retries.")
+
+(defparameter +max-stagnant-read-only-tool-iterations+ 2
+  "Maximum repeated identical read-only tool-call iterations before the runtime fails closed.")
+
+(defparameter +read-only-tool-loop-nudge-threshold+ 2
+  "Repeated identical read-only tool-call count that triggers a progression nudge.")
+
+(defparameter +read-only-tool-names+ '("file-read" "glob" "grep")
+  "Tool names treated as read-only for stagnant loop detection.")
 
 (defun register-tool (runtime tool)
   "Register TOOL under its declared name and return RUNTIME."
@@ -115,7 +124,8 @@
            (claw-lisp.core.domain:conversation-tool-results
             (claw-lisp.core.domain:agent-session-conversation session)))
          (ir (claw-lisp.core.domain:compaction-result-ir result))
-         (transcript-path (session-transcript-path runtime session)))
+         (transcript-path (session-transcript-path runtime session))
+         (persisted-ir nil))
     ;; Store provenance chain state on session
     (when ir
       (set-session-state-value
@@ -123,7 +133,27 @@
        (claw-lisp.core.compact:compaction-ir-fingerprint ir))
       (set-session-state-value
        session :compaction-depth
-       (1+ (or (session-state-value session :compaction-depth) 0))))
+       (1+ (or (session-state-value session :compaction-depth) 0)))
+      (handler-case
+          (setf persisted-ir
+                (claw-lisp.ir.compaction:persist-compaction-result-ir
+                 runtime session result))
+        (error (condition)
+          (warn "Failed to persist compaction IR for session ~A: ~A"
+                (claw-lisp.core.domain:agent-session-id session)
+                condition))))
+    (when persisted-ir
+      (when (getf persisted-ir :graph-descriptor)
+        (maybe-append-cas-object-written-event
+         session transcript-path (getf persisted-ir :graph-descriptor)))
+      (when (getf persisted-ir :summary-descriptor)
+        (maybe-append-cas-object-written-event
+         session transcript-path (getf persisted-ir :summary-descriptor)))
+      (when (getf persisted-ir :manifest-descriptor)
+        (maybe-append-cas-object-written-event
+         session transcript-path (getf persisted-ir :manifest-descriptor))
+        (maybe-append-cas-manifest-created-event
+         session transcript-path (getf persisted-ir :manifest-descriptor))))
     (maybe-append-transcript-event
      session
      transcript-path
@@ -134,6 +164,18 @@
            (length (claw-lisp.core.domain:compaction-result-preserved-messages result))
            :restored_tool_results_count
            (length restored-results)
+           :ir_cas_hash (and persisted-ir
+                             (claw-lisp.core.domain:artifact-cas-hash
+                              (getf persisted-ir :graph)))
+           :ir_cas_ref_name (and persisted-ir
+                                 (claw-lisp.core.domain:artifact-cas-ref-name
+                                  (getf persisted-ir :graph)))
+           :ir_manifest_hash (and persisted-ir
+                                  (claw-lisp.core.domain:artifact-cas-hash
+                                   (getf persisted-ir :manifest)))
+           :ir_manifest_ref_name (and persisted-ir
+                                      (claw-lisp.core.domain:artifact-cas-ref-name
+                                       (getf persisted-ir :manifest)))
            :ir (when ir
                  (claw-lisp.core.compact:compaction-ir-to-plist ir))))
     (update-session-memory config session)
@@ -149,6 +191,14 @@
     (setf (getf state key) value)
     (setf (claw-lisp.core.domain:agent-session-state session) state)
     session))
+
+(defun %transition-coding-phase (session new-phase reason &key clear-last-verify-result)
+  "Transition SESSION to NEW-PHASE when needed and optionally clear verify state."
+  (unless (eq (claw-lisp.core.phases:get-current-phase session) new-phase)
+    (claw-lisp.core.phases:transition-phase session new-phase reason))
+  (when clear-last-verify-result
+    (claw-lisp.core.phases:set-last-verify-result session nil))
+  session)
 
 (defun session-runtime-event-callback (session)
   "Return the optional runtime event callback for SESSION."
@@ -175,50 +225,102 @@
   "Set the Phase 8 supervisor state on SESSION and return SESSION."
   (set-session-state-value session :agent-supervisor-state supervisor-state))
 
-(defun %public-child-agent-unavailable (&optional detail)
-  "Signal that child-agent orchestration depth is not included in the public build."
-  (error "Child-agent orchestration is not included in the public Achatina build~@[: ~A~]."
-         detail))
+(defun %ensure-session-supervisor (session)
+  "Ensure SESSION has a supervisor state and return it."
+  (or (session-supervisor-state session)
+      (let ((created (claw-lisp.core.agent-supervisor:ensure-agent-supervisor session)))
+        (set-session-supervisor-state session created)
+        created)))
 
 (defun spawn-child-agent (runtime session &rest args &key &allow-other-keys)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session args))
-  (%public-child-agent-unavailable "spawn-child-agent"))
+  "Spawn a child agent under SESSION and return child-agent-handle.
+
+ARGS are forwarded to `claw-lisp.core.agent-supervisor:spawn-child-agent`."
+  (%ensure-session-supervisor session)
+  (let* ((handle (apply #'claw-lisp.core.agent-supervisor:spawn-child-agent runtime session args))
+         (child-session (claw-lisp.core.domain:child-agent-handle-session handle))
+         (child-id (claw-lisp.core.domain:child-agent-handle-child-id handle)))
+    (maybe-append-transcript-event
+     session
+     (session-transcript-path runtime session)
+     (list :event "child_spawned"
+           :session_id (claw-lisp.core.domain:agent-session-id session)
+           :child_id child-id
+           :status :starting
+           :child_transcript_path
+           (namestring (session-transcript-path runtime child-session))))
+    handle))
 
 (defun send-agent-message (runtime session child-id type payload &key correlation-id timeout-seconds)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session child-id type payload correlation-id timeout-seconds))
-  (%public-child-agent-unavailable "send-agent-message"))
+  "Send a control message from SESSION supervisor to CHILD-ID."
+  (declare (ignore runtime))
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (claw-lisp.core.agent-supervisor:send-agent-message
+     supervisor child-id type payload
+     :correlation-id correlation-id
+     :timeout-seconds timeout-seconds)))
 
 (defun receive-agent-message (runtime session &key timeout-seconds)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session timeout-seconds))
-  (%public-child-agent-unavailable "receive-agent-message"))
+  "Receive one message from SESSION supervisor mailbox."
+  (declare (ignore runtime))
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (claw-lisp.core.agent-supervisor:receive-agent-message
+     supervisor
+     :timeout-seconds timeout-seconds)))
 
 (defun await-child-agent (runtime session child-id &key timeout-seconds)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session child-id timeout-seconds))
-  (%public-child-agent-unavailable "await-child-agent"))
+  "Wait for CHILD-ID to finish under SESSION supervisor."
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (let ((summary (claw-lisp.core.agent-supervisor:await-child-agent
+                    supervisor child-id :timeout-seconds timeout-seconds)))
+      (maybe-append-transcript-event
+       session
+       (session-transcript-path runtime session)
+       (list :event "child_finished"
+             :session_id (claw-lisp.core.domain:agent-session-id session)
+             :child_id child-id
+             :status (getf summary :status)
+             :error (getf summary :error)
+             :child_transcript_path
+             (let ((handle (claw-lisp.core.agent-supervisor:find-child-handle supervisor child-id)))
+               (when handle
+                 (namestring
+                  (session-transcript-path runtime
+                                           (claw-lisp.core.domain:child-agent-handle-session handle)))))))
+      summary)))
 
 (defun list-child-agents (runtime session)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session))
-  (%public-child-agent-unavailable "list-child-agents"))
+  "Return child handles registered for SESSION."
+  (declare (ignore runtime))
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (claw-lisp.core.agent-supervisor:list-child-agents supervisor)))
 
 (defun child-progress-snapshot (runtime session child-id)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session child-id))
-  (%public-child-agent-unavailable "child-progress-snapshot"))
+  "Return one child progress snapshot for CHILD-ID under SESSION, or NIL."
+  (declare (ignore runtime))
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (claw-lisp.core.agent-supervisor:child-progress-snapshot supervisor child-id)))
 
 (defun list-child-progress-snapshots (runtime session)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session))
-  (%public-child-agent-unavailable "list-child-progress-snapshots"))
+  "Return progress snapshots for all children under SESSION supervisor."
+  (declare (ignore runtime))
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (claw-lisp.core.agent-supervisor:list-child-progress-snapshots supervisor)))
 
 (defun cancel-child-agent (runtime session child-id &key reason)
-  "Signal that child-agent orchestration is unavailable in the public build."
-  (declare (ignore runtime session child-id reason))
-  (%public-child-agent-unavailable "cancel-child-agent"))
+  "Cancel CHILD-ID under SESSION supervisor."
+  (let ((supervisor (%ensure-session-supervisor session)))
+    (let ((cancelled-p (claw-lisp.core.agent-supervisor:cancel-child-agent
+                        supervisor child-id :reason reason)))
+      (when cancelled-p
+        (maybe-append-transcript-event
+         session
+         (session-transcript-path runtime session)
+         (list :event "child_cancel_requested"
+               :session_id (claw-lisp.core.domain:agent-session-id session)
+               :child_id child-id
+               :reason reason)))
+      cancelled-p)))
 
 (defun compaction-failure-count (session)
   "Return the consecutive compaction failure count for SESSION."
@@ -257,6 +359,10 @@ for observability. Returns the list of saved records."
              :session_id (claw-lisp.core.domain:agent-session-id session)
              :saved_count (length saved))))
     saved))
+
+(defun consolidate-durable-memory-store (runtime)
+  "Run the baseline durable-memory consolidation pass for RUNTIME."
+  (consolidate-durable-memory (runtime-settings runtime)))
 
 (defun maybe-append-transcript-event (session pathname event)
   "Append EVENT to PATHNAME, degrading to a warning on transcript I/O failure.
@@ -756,24 +862,83 @@ that starts with '[' and contains 'error' or 'timed out'."
                (or (not (null (search "error" downcased)))
                    (not (null (search "timed out" downcased)))))))))
 
-(defun make-tool-result-message (tool-results)
+(defun read-only-loop-progression-nudge-text ()
+  "Return a focused user-visible nudge for stagnant coding loops."
+  (concatenate
+   'string
+   "You already have enough context from the files you read. "
+   "Do not repeat discovery tools or reread the same inputs again. "
+   "Your next step must be one of: "
+   "(1) use file-write or file-replace to edit the likely target file, "
+   "(2) use shell-command to run a focused verification step, or "
+   "(3) explain concretely why you cannot proceed with either action."))
+
+(defun make-tool-result-message (tool-results &key progression-nudge)
   "Build a user message containing tool_result content blocks.
 
    TOOL-RESULTS is a list of tool-result structs produced by tool execution.
    Each result is converted to a `tool-result-block` so the Anthropic API
-   can associate results with the tool_use blocks that requested them."
+   can associate results with the tool_use blocks that requested them.
+
+   When PROGRESSION-NUDGE is a non-empty string, append it as a trailing
+   text block in the same user message. This mirrors the `src` pattern of
+   steering the next model turn via tool-result-adjacent guidance."
   (make-message
    :role :user
    :content
-   (loop for result in tool-results
-         collect
-         (claw-lisp.core.domain:make-tool-result-block
-          :tool-use-id (claw-lisp.core.domain:tool-result-call-id result)
-          :content (let ((c (claw-lisp.core.domain:tool-result-content result)))
-                     (if (and (stringp c) (plusp (length c)))
-                         c
-                         "Tool execution failed with no output."))
-          :is-error (tool-result-error-p result)))))
+   (append
+    (loop for result in tool-results
+          collect
+          (claw-lisp.core.domain:make-tool-result-block
+           :tool-use-id (claw-lisp.core.domain:tool-result-call-id result)
+           :content (let ((c (claw-lisp.core.domain:tool-result-content result)))
+                      (if (and (stringp c) (plusp (length c)))
+                          c
+                          "Tool execution failed with no output."))
+           :is-error (tool-result-error-p result)))
+    (when (and progression-nudge (plusp (length progression-nudge)))
+      (list (claw-lisp.core.domain:make-text-block
+             :text progression-nudge))))))
+
+(defun tool-call-signature (tool-call)
+  "Return a deterministic signature for TOOL-CALL."
+  (with-output-to-string (out)
+    (prin1 (list :name (getf tool-call :name)
+                 :input (getf tool-call :input))
+           out)))
+
+(defun read-only-tool-call-p (tool-call)
+  "Return true when TOOL-CALL is a read-only filesystem/query action."
+  (member (getf tool-call :name) +read-only-tool-names+ :test #'string=))
+
+(defun check-for-stagnant-read-only-tool-loop (session tool-calls)
+  "Track repeated identical read-only tool-call batches and fail closed on stagnation."
+  (if (and tool-calls
+           (every #'read-only-tool-call-p tool-calls))
+      (let* ((signature (mapcar #'tool-call-signature tool-calls))
+             (previous (session-state-value session :last-read-only-tool-call-signature nil))
+             (repeat-count (session-state-value session :read-only-tool-loop-repeat-count 0))
+             (nudge-signature (session-state-value session :last-read-only-tool-loop-nudge-signature nil))
+             (new-count (if (equal signature previous)
+                            (1+ repeat-count)
+                            1))
+             (nudge-needed-p (and (>= new-count +read-only-tool-loop-nudge-threshold+)
+                                  (not (equal signature nudge-signature)))))
+        (set-session-state-value session :last-read-only-tool-call-signature signature)
+        (set-session-state-value session :read-only-tool-loop-repeat-count new-count)
+        (when nudge-needed-p
+          (set-session-state-value session
+                                   :last-read-only-tool-loop-nudge-signature
+                                   signature))
+        (when (> new-count +max-stagnant-read-only-tool-iterations+)
+          (error "Repeated read-only tool loop detected for session ~A. The model reread the same inputs without progressing to write or test actions."
+                 (claw-lisp.core.domain:agent-session-id session)))
+        (values new-count nudge-needed-p))
+      (progn
+        (set-session-state-value session :last-read-only-tool-call-signature nil)
+        (set-session-state-value session :read-only-tool-loop-repeat-count 0)
+        (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
+        (values 0 nil))))
 
 (defun ensure-turn-not-in-flight (session)
   "Signal an error when SESSION already has a turn executing."
@@ -799,6 +964,7 @@ that starts with '[' and contains 'error' or 'timed out'."
    :turn-in-flight-p
    "Session is busy executing a turn. Reentrant turns on the same session are not allowed."
    (lambda ()
+     (claw-lisp.core.phases:initialize-phase-state session)
      (let ((conversation (claw-lisp.core.domain:agent-session-conversation session))
            (model (claw-lisp.core.domain:agent-session-model session))
            (system-prompt (claw-lisp.core.system-prompt:build-system-prompt
@@ -810,15 +976,9 @@ that starts with '[' and contains 'error' or 'timed out'."
                                                          model :tools))
                        (tools (when supports-tools
                                 (provider-tool-descriptors runtime)))
-                       ;; ---------------------------------------------------------
-                       ;; 1. Idle-Gap Trigger (on new user message arrival)
-                       ;; ---------------------------------------------------------
                        (_ (maybe-idle-gap-microcompact runtime session model
                                                        :system-prompt system-prompt
                                                        :tool-definitions tools))
-                       ;; ---------------------------------------------------------
-                       ;; 1b. Durable Memory Context Injection (after idle-gap)
-                       ;; ---------------------------------------------------------
                        (_ (let ((user-msg (find :user
                                                 (claw-lisp.core.domain:conversation-messages conversation)
                                                 :key #'claw-lisp.core.domain:message-role
@@ -832,14 +992,10 @@ that starts with '[' and contains 'error' or 'timed out'."
                                 :messages (claw-lisp.core.domain:conversation-messages conversation))
                                :pass :initial
                                :force-refresh nil))))
-                       ;; ---------------------------------------------------------
-                       ;; 2. Proactive Context Check (pre-API call)
-                       ;; ---------------------------------------------------------
                        (pre-status (check-and-manage-context runtime session model
                                                              :system-prompt system-prompt
                                                              :tool-definitions tools
                                                              :on-warning nil))
-                       ;; Abort early if compaction can't free enough space
                        (_ (when (and (eq (context-status-action pre-status) :full-compaction)
                                      (>= (context-status-usage-ratio pre-status)
                                          (claw-lisp.config:runtime-config-context-compact-required-threshold
@@ -847,9 +1003,9 @@ that starts with '[' and contains 'error' or 'timed out'."
                             (warn "Context still at ~,1F% after compaction. Aborting turn."
                                   (* 100 (context-status-usage-ratio pre-status)))
                             (return-from execute-provider-turn-loop nil)))
-                       ;; ---------------------------------------------------------
-                       ;; 3. Reactive 413 Handler (wraps actual API call)
-                       ;; ---------------------------------------------------------
+                       (_ (when (null (claw-lisp.core.phases:get-current-phase session))
+                            (%transition-coding-phase session :inspect "coding turn started"
+                                                      :clear-last-verify-result t)))
                        (response
                          (handler-case
                              (let ((api-response
@@ -861,11 +1017,9 @@ that starts with '[' and contains 'error' or 'timed out'."
                                                    :tools tools
                                                    :on-event on-event
                                                    :system system-prompt))))
-                               ;; Success: record interaction time for future idle-gap detection
                                (update-last-interaction-time session)
                                api-response)
                            (context-exceeded-error ()
-                             ;; Reactive recovery: compact + retry exactly once
                              (handle-context-exceeded runtime session model
                                                       :system-prompt system-prompt
                                                       :tool-definitions tools
@@ -881,7 +1035,16 @@ that starts with '[' and contains 'error' or 'timed out'."
                                                                       :system system-prompt)))))))
                        (tool-calls (response-tool-calls response)))
                   (append-assistant-message runtime session response)
-                  (if tool-calls
+                  (claw-lisp.core.phases:increment-turn-count session)
+                  (claw-lisp.core.phases:set-last-turn-tool-count
+                   session
+                   (length tool-calls))
+                  (when tool-calls
+                    (%transition-coding-phase session :edit "tool calls requested"
+                                              :clear-last-verify-result t))
+                  (when tool-calls
+                    (multiple-value-bind (read-only-repeat-count nudge-needed-p)
+                        (check-for-stagnant-read-only-tool-loop session tool-calls)
                       (let ((result-count-before
                               (length (claw-lisp.core.domain:conversation-tool-results conversation))))
                         (dolist (tool-call tool-calls)
@@ -901,25 +1064,70 @@ that starts with '[' and contains 'error' or 'timed out'."
                                 (claw-lisp.core.domain:record-tool-result
                                  (claw-lisp.core.domain:agent-session-conversation session)
                                  error-result)))))
-                        ;; Collect the tool results produced in this iteration
-                        ;; and send them back to the API as a user message.
                         (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
-                               (new-results (nthcdr result-count-before all-results)))
+                               (new-results (nthcdr result-count-before all-results))
+                               (progression-nudge (when nudge-needed-p
+                                                    (read-only-loop-progression-nudge-text))))
                           (when new-results
-                            (let ((result-msg (make-tool-result-message new-results)))
+                            (let ((result-msg (make-tool-result-message
+                                               new-results
+                                               :progression-nudge progression-nudge))
+                                  (transcript-path (session-transcript-path runtime session)))
                               (append-message conversation result-msg)
-                              (let ((transcript-path (session-transcript-path runtime session)))
+                              (maybe-append-transcript-event
+                               session
+                               transcript-path
+                               (list :event "tool_results_sent"
+                                     :session_id (claw-lisp.core.domain:agent-session-id session)
+                                     :count (length new-results)
+                                     :progression_nudge_p (and nudge-needed-p t)))
+                              (when nudge-needed-p
                                 (maybe-append-transcript-event
                                  session
                                  transcript-path
-                                 (list :event "tool_results_sent"
+                                 (list :event "tool_loop_nudge"
                                        :session_id (claw-lisp.core.domain:agent-session-id session)
-                                       :count (length new-results))))))))
+                                       :repeat_count read-only-repeat-count
+                                       :tool_names (mapcar (lambda (tool-call)
+                                                             (getf tool-call :name))
+                                                           tool-calls))))
+                              (let ((user-msg (find :user
+                                                    (claw-lisp.core.domain:conversation-messages conversation)
+                                                    :key #'claw-lisp.core.domain:message-role
+                                                    :from-end t)))
+                                (when user-msg
+                                  (claw-lisp.storage.durable-memory-search:inject-durable-memory-context
+                                   session
+                                   (claw-lisp.core.domain:make-agent-turn
+                                    :content (claw-lisp.core.domain:message-content-text user-msg)
+                                    :messages (claw-lisp.core.domain:conversation-messages conversation)
+                                    :tool-results new-results)
+                                   :pass :augmented
+                                   :force-refresh nil)))))))))
+                  (when tool-calls
+                    ;; Increment phase counter for current phase
+                    (let ((current-phase (claw-lisp.core.phases:get-current-phase session)))
+                      (when current-phase
+                        (claw-lisp.core.phases:increment-phase-counter session current-phase)))
+                    ;; Apply progression policy (PHZ-003)
+                    (let ((transcript-path (session-transcript-path runtime session)))
+                      (claw-lisp.core.phase-progression:apply-progression-policy
+                       session tool-calls runtime transcript-path))
+                    ;; Fallback: if still in :edit after tools, transition to :verify
+                    (when (eq :edit (claw-lisp.core.phases:get-current-phase session))
+                      (%transition-coding-phase session :verify "tool results ready"
+                                                :clear-last-verify-result t)))
+                  (multiple-value-bind (completed-p completion-reason)
+                      (claw-lisp.core.completion:maybe-auto-complete session response)
+                    (declare (ignore completion-reason))
+                    (when completed-p
                       (return response)))
-                finally
-                   (error "Provider tool loop exceeded ~D iterations for session ~A."
-                          +max-provider-tool-iterations+
-                          (claw-lisp.core.domain:agent-session-id session)))))))
+                  (unless tool-calls
+                    (return response)))
+             finally
+                (error "Provider tool loop exceeded ~D iterations for session ~A."
+                       +max-provider-tool-iterations+
+                       (claw-lisp.core.domain:agent-session-id session)))))))
 
 (defun default-tool-allowed-roots (config)
   "Return the baseline local roots allowed for filesystem tools."
@@ -981,6 +1189,8 @@ tool results."
          (normalized-result nil))
     (unless tool
       (error "Unknown tool: ~A" tool-name))
+    ;; Phase compatibility check (FND-004 / PHZ-002)
+    (claw-lisp.core.tool-phases:check-tool-phase-compatibility tool session)
     (handler-case
         (let* ((validated (claw-lisp.core.protocols:validate-tool-input tool input))
                (authorized (progn
@@ -1088,15 +1298,16 @@ tool results."
          (effective-model
            (or model
                (claw-lisp.config:runtime-config-default-model config))))
-    (let ((session
+      (let ((session
             (make-agent-session
              :id (or session-id "session-0")
              :provider effective-provider
              :model effective-model
              :conversation (make-conversation :id (or session-id "session-0"))
              :state '(:initialized t))))
-      (handler-case
-          (ensure-session-transcript config session)
+        (claw-lisp.core.phases:initialize-phase-state session)
+        (handler-case
+            (ensure-session-transcript config session)
         (error (condition)
           (warn "Failed to initialize transcript for session ~A: ~A"
                 (claw-lisp.core.domain:agent-session-id session)
