@@ -1318,13 +1318,7 @@ observability records, are intentionally dropped in runner v0."
            (format t "No background tasks right now.~%")))
      (values t session))
     ((string= command ":agents")
-     (let ((snapshots (claw-lisp.core.runtime:list-child-progress-snapshots runtime session)))
-       (if snapshots
-           (progn
-             (format t "Child agents:~%")
-             (dolist (snapshot snapshots)
-               (%print-child-snapshot-line snapshot)))
-           (format t "No child agents tracked yet.~%")))
+     (format t "Child-agent orchestration commands are not included in the public Achatina build.~%")
      (values t session))
     ((string= command ":agent")
      (format t "Usage: :agent <child-id>~%")
