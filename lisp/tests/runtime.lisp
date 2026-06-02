@@ -206,7 +206,7 @@
     (%assert (search "\"name\":\"file-read\"" json)
              "Expected serialized tool name in OpenRouter JSON, got ~A"
              json)
-    (%assert (search "\"input_schema\":{\"type\":\"object\"" json)
+    (%assert (search "\"parameters\":{\"type\":\"object\"" json)
              "Expected serialized tool schema object in OpenRouter JSON, got ~A"
              json)))
 
