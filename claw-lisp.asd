@@ -108,6 +108,7 @@
    (:file "lisp/tests/tool-envelope-test")
    (:file "lisp/tests/tool-phases-test")
    (:file "lisp/tests/phase-progression-test")
+   (:file "lisp/tests/prf-001-regression-test")
    (:file "lisp/tests/cas-ref-store")
    (:file "lisp/tests/cas-manifest")
    (:file "lisp/tests/cas-integrity")

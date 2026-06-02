@@ -35,26 +35,37 @@
                  (zerop last-turn-tools)))))))
 
 (defun has-text-content-p (response)
-  "Return T if RESPONSE contains text content blocks."
+  "Return T if RESPONSE has non-empty text content.
+   Handles both transport-response structs and plist responses."
   (when response
-    (let ((content (getf response :content)))
-      (and content
-           (listp content)
-           (some (lambda (block)
-                   (and (consp block)
-                        (eq :text (getf block :type))))
-                 content)))))
+    (typecase response
+      (claw-lisp.core.domain:transport-response
+       (let ((text (claw-lisp.core.domain:transport-response-assistant-text response)))
+         (and text (> (length text) 0))))
+      (t
+       (let ((content (getf response :content)))
+         (and content
+              (listp content)
+              (some (lambda (block)
+                      (and (consp block)
+                           (eq :text (getf block :type))))
+                    content)))))))
 
 (defun has-tool-calls-p (response)
-  "Return T if RESPONSE contains tool use blocks."
+  "Return T if RESPONSE contains tool use/calls.
+   Handles both transport-response structs and plist responses."
   (when response
-    (let ((content (getf response :content)))
-      (and content
-           (listp content)
-           (some (lambda (block)
-                   (and (consp block)
-                        (eq :tool_use (getf block :type))))
-                 content)))))
+    (typecase response
+      (claw-lisp.core.domain:transport-response
+       (not (null (claw-lisp.core.domain:transport-response-tool-calls response))))
+      (t
+       (let ((content (getf response :content)))
+         (and content
+              (listp content)
+              (some (lambda (block)
+                      (and (consp block)
+                           (eq :tool_use (getf block :type))))
+                    content)))))))
 
 ;;; --- Completion Transition ---
 
