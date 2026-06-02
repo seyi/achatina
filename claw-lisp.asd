@@ -103,6 +103,7 @@
    (:file "lisp/tests/cas-test")
    (:file "lisp/tests/phases-test")
    (:file "lisp/tests/completion-test")
+   (:file "lisp/tests/tool-envelope-test")
    (:file "lisp/tests/cas-ref-store")
    (:file "lisp/tests/cas-manifest")
    (:file "lisp/tests/cas-integrity")

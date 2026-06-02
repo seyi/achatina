@@ -1841,7 +1841,6 @@
    #:tool-envelope-content
    #:tool-envelope-error-type
    #:tool-envelope-error-message
-   #:tool-envelope-is-error
    #:tool-envelope-duration-ms
    #:tool-envelope-timestamp
    #:tool-envelope-phase-at-execution

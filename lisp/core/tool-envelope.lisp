@@ -4,30 +4,47 @@
 ;;; Normalized Tool Result Envelope for Coding CLI (FND-003)
 ;;; ============================================================
 ;;;
-;;; This module wraps raw tool execution results in a normalized
-;;; envelope that captures success/failure state, error classification,
-;;; timing metadata, and phase compatibility information.
+;;; This module wraps tool execution results in a normalized envelope
+;;; that captures success/failure state, error classification, timing
+;;; metadata, and phase compatibility information.
 ;;;
 ;;; The envelope is layered ON TOP of the existing tool-result struct
 ;;; in domain.lisp — it does not replace it. The runtime continues to
 ;;; produce tool-result structs; this module interprets and classifies
 ;;; them for the coding CLI's phase-aware decision-making.
+;;;
+;;; Tool categorization is provisional here. FND-004 will introduce a
+;;; proper registry-based category system on tool registration.
 
 (defstruct (tool-envelope
-            (:constructor make-tool-envelope
+            (:constructor %make-tool-envelope
                 (&key success tool-name content
-                      error-type error-message is-error
+                      error-type error-message
                       duration-ms timestamp
                       phase-at-execution)))
   (success nil :type boolean)
   (tool-name "" :type string)
-  content
-  (error-type nil)
-  (error-message nil)
-  (is-error nil :type boolean)
-  (duration-ms 0)
+  (content nil :type t)
+  (error-type nil :type (or null keyword))
+  (error-message nil :type (or null string))
+  (duration-ms 0 :type number)
   (timestamp 0 :type integer)
-  (phase-at-execution nil))
+  (phase-at-execution nil :type (or null keyword)))
+
+(defun make-tool-envelope (&key success tool-name content
+                                error-type error-message
+                                duration-ms timestamp
+                                phase-at-execution)
+  "Construct a tool-envelope. Failure is derived from (not success)."
+  (%make-tool-envelope
+   :success success
+   :tool-name (or tool-name "")
+   :content content
+   :error-type error-type
+   :error-message error-message
+   :duration-ms (or duration-ms 0)
+   :timestamp (or timestamp (get-universal-time))
+   :phase-at-execution phase-at-execution))
 
 ;;; --- Error Classification ---
 
@@ -58,7 +75,6 @@
    :tool-name tool-name
    :error-type (classify-tool-error condition)
    :error-message (princ-to-string condition)
-   :is-error t
    :duration-ms (or duration-ms 0)
    :timestamp (get-universal-time)
    :phase-at-execution phase))
@@ -69,21 +85,20 @@
   "Create a tool-envelope from an existing domain tool-result struct.
 
    Interprets the tool-result content to determine success/error state.
-   A tool-result with empty content or content starting with 'Error:' is
-   treated as a failure."
+   A tool-result whose content starts with 'error:' (case-insensitive)
+   is treated as a failure. Empty or non-string content is treated as
+   success (empty file reads, nil results are valid)."
   (let* ((tool-name (claw-lisp.core.domain:tool-result-tool-name tool-result))
          (content (claw-lisp.core.domain:tool-result-content tool-result))
          (is-error (and (stringp content)
-                        (> (length content) 0)
-                        (or (search "Error:" content :end2 (min 6 (length content)))
-                            (search "error:" content :end2 (min 6 (length content)))))))
+                        (>= (length content) 6)
+                        (string-equal "error:" (subseq content 0 6)))))
     (make-tool-envelope
      :success (not is-error)
      :tool-name tool-name
      :content content
      :error-type (when is-error :execution)
      :error-message (when is-error content)
-     :is-error (if is-error t nil)
      :timestamp (get-universal-time)
      :phase-at-execution phase)))
 
@@ -95,17 +110,19 @@
 
 (defun envelope-failed-p (envelope)
   "Return T if ENVELOPE represents a failed tool execution."
-  (tool-envelope-is-error envelope))
+  (not (tool-envelope-success envelope)))
 
 (defun envelope-is-read-only-p (envelope)
   "Return T if ENVELOPE's tool is a read-only operation.
-   Used by phase logic to distinguish inspection from mutation."
+   Used by phase logic to distinguish inspection from mutation.
+   Tools not in either list return NIL from both predicates (unknown category)."
   (let ((name (tool-envelope-tool-name envelope)))
-    (member name '("file-read" "glob" "grep" "shell-command")
+    (member name '("file-read" "glob" "grep")
             :test #'string-equal)))
 
 (defun envelope-is-mutation-p (envelope)
-  "Return T if ENVELOPE's tool is a write/mutation operation."
+  "Return T if ENVELOPE's tool is a write/mutation operation.
+   Tools not in either list return NIL from both predicates (unknown category)."
   (let ((name (tool-envelope-tool-name envelope)))
     (member name '("file-write" "file-replace")
             :test #'string-equal)))
