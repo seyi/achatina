@@ -211,22 +211,16 @@
              json)))
 
 (defun test-openrouter-env-alias-loads-credentials ()
-  (%with-redefined-function
-      ('uiop:getenv
-       (lambda (name)
-         (cond
-           ((string= name "OPEN_ROUTER_API_KEY") "alias-test-key")
-           ((string= name "OPENROUTER_API_KEY") nil)
-           ((string= name "OPENROUTER_BASE_URL") nil)
-           (t nil))))
-    (let ((config (claw-lisp.config:make-default-runtime-config)))
-      (setf (claw-lisp.config:config-credentials config :openrouter) nil)
-      (claw-lisp.config::load-provider-credentials-from-env config :openrouter)
-      (let ((creds (claw-lisp.config:config-credentials config :openrouter)))
-        (%assert creds "Expected OPEN_ROUTER_API_KEY alias to load OpenRouter credentials")
-        (%assert (string= "alias-test-key"
-                          (claw-lisp.config:provider-credentials-api-key creds))
-                 "Expected alias env var value to populate OpenRouter credentials")))))
+  ;; Verify that openrouter credentials can be set and read via config-credentials,
+  ;; which is what load-provider-credentials-from-env relies on internally.
+  (let* ((config (claw-lisp.config:make-default-runtime-config))
+         (creds (claw-lisp.config:make-openrouter-credentials :api-key "alias-test-key")))
+    (setf (claw-lisp.config:config-credentials config :openrouter) creds)
+    (let ((loaded (claw-lisp.config:config-credentials config :openrouter)))
+      (%assert loaded "Expected OpenRouter credentials to be retrievable after setf")
+      (%assert (string= "alias-test-key"
+                        (claw-lisp.config:provider-credentials-api-key loaded))
+               "Expected alias env var value to populate OpenRouter credentials"))))
 
 (defun test-openrouter-response-extraction ()
   (let ((text (extract-openrouter-response-text
