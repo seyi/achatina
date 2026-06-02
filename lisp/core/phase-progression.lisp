@@ -26,7 +26,7 @@
    Uses tool-envelope predicates to determine if a tool is read-only
    or a mutation. Tools in neither category are ignored.
    Returns nil if TOOL-CALLS is empty or no tools are classifiable."
-  (declare (ignore runtime))
+  (declare (ignore runtime)) ;; runtime unused — envelope probes are global. Future: use runtime-scoped tool resolution.
   (when (null tool-calls)
     (return-from classify-tool-calls-for-phase nil))
   (let ((has-read nil)
@@ -39,7 +39,11 @@
            (setf has-write t))
           ((claw-lisp.core.tool-envelope:envelope-is-read-only-p probe)
            (setf has-read t))
-          ;; Unknown category (shell-command, echo) → treat as read for stagnation
+          ;; Unknown category (shell-command, echo, future plugins) → treat as
+          ;; read-only for stagnation purposes. Rationale: defaulting to :read-only
+          ;; means "don't skip verification" which is safer than :mutation (which
+          ;; would prematurely advance to :edit). When FND-004 tool-phase registry
+          ;; is wired, this fallback becomes less relevant.
           (t (setf has-read t)))))
     (cond
       ((and has-read has-write) :mixed)

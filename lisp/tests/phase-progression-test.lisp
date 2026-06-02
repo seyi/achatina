@@ -175,7 +175,7 @@
                "file-read should classify as :read-only via envelope predicate, got ~A" result)
       (format t "  ✓ dual-phase tool classified by envelope predicate (read-only)~%"))))
 
-(defun test-apply-progression-returns-three-nils-on-invalid ()
+(defun test-apply-progression-returns-three-nils-when-no-recommendation ()
   (let ((runtime (%make-test-runtime-for-progression))
         (session (%make-test-session))
         (tool-calls '((:name "file-read" :id "t1" :input nil))))
@@ -193,7 +193,7 @@
       (%assert (null transitioned) "Should not transition from :complete")
       (%assert (null new-phase) "New phase should be nil")
       (%assert (null reason) "Reason should be nil")
-      (format t "  ✓ apply-progression-policy returns three nils on invalid transition~%"))))
+      (format t "  ✓ apply-progression-policy returns three nils (no recommendation path)~%"))))
 
 (defun run-phase-progression-tests ()
   (format t "~%=== PHZ-003/004 Phase Progression Tests ===~%~%")
@@ -209,5 +209,5 @@
   (test-recommend-verify-after-edit-stagnation)
   (test-apply-progression-policy-transitions)
   (test-apply-progression-policy-no-op)
-  (test-apply-progression-returns-three-nils-on-invalid)
+  (test-apply-progression-returns-three-nils-when-no-recommendation)
   (format t "~%=== All PHZ-003/004 Tests Passed! ===~%"))
