@@ -1856,6 +1856,13 @@
    #:envelope-is-read-only-p
    #:envelope-is-mutation-p))
 
+(defpackage #:claw-lisp.core.tool-phases
+  (:use #:cl)
+  (:export
+   #:tool-valid-phases
+   #:tool-valid-for-phase-p
+   #:check-tool-phase-compatibility))
+
 (defpackage #:claw-lisp.core.agent-mailbox
   (:use #:cl)
   (:import-from #:claw-lisp.core.domain
