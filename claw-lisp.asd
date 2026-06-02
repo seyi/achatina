@@ -100,6 +100,7 @@
    (:file "lisp/tests/rate-limit")
    (:file "lisp/tests/cas-test")
    (:file "lisp/tests/cas-ref-store")
+   (:file "lisp/tests/phases-test")
    (:file "lisp/tests/cas-manifest")
    (:file "lisp/tests/cas-integrity")
    (:file "lisp/tests/artifacts")
