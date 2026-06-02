@@ -5,7 +5,7 @@
 ;; Provides a REPL (Read-Eval-Print Loop) for interacting with Claw.
 ;;
 ;; Usage:
-;;   sbcl --load achatina-cli.asd --eval "(claw-lisp.cli:run-cli)"
+;;   sbcl --load claw-lisp-cli.asd --eval "(claw-lisp.cli:run-cli)"
 ;;
 ;; Or from the Makefile:
 ;;   make repl
@@ -14,7 +14,7 @@
   "Claw Lisp CLI version.")
 
 (defparameter +cli-welcome-message+
-  "Welcome to Achatina CLI ~A.
+  "Welcome to Claw Lisp CLI ~A.
 Type your message and press Enter. Use :help for commands.
 Type :quit or Ctrl+D to exit.~%"
   "Welcome message displayed at CLI startup.")
@@ -244,8 +244,8 @@ non-interactive runner flags."
 
 (defun print-usage ()
   "Print top-level CLI usage."
-  (format t "Usage: achatina [--json-run [runner flags]]~%")
-  (format t "       achatina            ; interactive REPL~%")
+  (format t "Usage: claw-lisp [--json-run [runner flags]]~%")
+  (format t "       claw-lisp            ; interactive REPL~%")
   (format t "General flags:~%")
   (format t "  --help~%")
   (format t "Runner flags:~%")
@@ -481,17 +481,11 @@ observability records, are intentionally dropped in runner v0."
   (let ((config (claw-lisp.config:load-runtime-config
                  :overrides (list :default-provider provider
                                   :default-model model))))
-    (let ((state-root (%request-environment-path request :state_root))
-          (data-root (%request-environment-path request :data_root))
-          (transcripts-root (%request-environment-path request :transcript_root))
+    (let ((transcripts-root (%request-environment-path request :transcript_root))
           (memory-root (%request-environment-path request :memory_root))
           (artifacts-root (%request-environment-path request :artifacts_root))
           (cas-objects-root (%request-environment-path request :cas_objects_root))
           (cas-ref-root (%request-environment-path request :cas_ref_root)))
-      (when state-root
-        (claw-lisp.config:apply-state-root config state-root))
-      (when data-root
-        (claw-lisp.config:apply-state-root config data-root))
       (when transcripts-root
         (setf (claw-lisp.config:runtime-config-transcripts-root config) transcripts-root))
       (when memory-root
@@ -1057,10 +1051,7 @@ observability records, are intentionally dropped in runner v0."
                          (format t "  (none registered)~%")))))
            (values t session)))))
     ((string= command ":memory")
-     (let ((path (or (claw-lisp.storage.session-memory:session-memory-existing-path
-                      (claw-lisp.core.runtime:runtime-settings runtime)
-                      (claw-lisp.core.domain:agent-session-id session))
-                     (claw-lisp.core.runtime:session-memory-path-for-session runtime session))))
+     (let ((path (claw-lisp.core.runtime:session-memory-path-for-session runtime session)))
        (format t "Session memory status:~%")
        (format t "  Path: ~A~%" path)
        (if (probe-file path)
@@ -1075,10 +1066,7 @@ observability records, are intentionally dropped in runner v0."
            (format t "  Exists: no~%")))
      (values t session))
     ((string= command ":memory-content")
-     (let ((path (or (claw-lisp.storage.session-memory:session-memory-existing-path
-                      (claw-lisp.core.runtime:runtime-settings runtime)
-                      (claw-lisp.core.domain:agent-session-id session))
-                     (claw-lisp.core.runtime:session-memory-path-for-session runtime session))))
+     (let ((path (claw-lisp.core.runtime:session-memory-path-for-session runtime session)))
        (if (probe-file path)
            (progn
              (format t "Session memory at: ~A~%" path)
@@ -1155,8 +1143,7 @@ observability records, are intentionally dropped in runner v0."
                                   :error)))
                 (providers (claw-lisp.core.runtime:list-provider-names runtime))
                 (tools (claw-lisp.core.runtime:list-tool-names runtime))
-                (transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
-                                     (claw-lisp.core.runtime:session-transcript-path runtime session))))
+                (transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session)))
            (format t "Runtime diagnostics:~%")
            (format t "  Session id: ~A~%" (claw-lisp.core.domain:agent-session-id session))
            (format t "  Provider: ~A~%" (claw-lisp.core.domain:agent-session-provider session))
@@ -1182,8 +1169,7 @@ observability records, are intentionally dropped in runner v0."
             (state (claw-lisp.core.domain:agent-session-state session))
             (failures (getf state :compaction-failure-count 0))
             (circuit-open (claw-lisp.core.runtime:compaction-circuit-open-p session))
-            (transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
-                                 (claw-lisp.core.runtime:session-transcript-path runtime session))))
+            (transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session)))
        (multiple-value-bind (last-event-line transcript-error missing-event-count)
            (%find-last-compaction-event-line transcript-path)
        (format t "Compaction status:~%")
@@ -1208,8 +1194,7 @@ observability records, are intentionally dropped in runner v0."
      (values t session))
     ((multiple-value-bind (matched args) (%command-dispatch command ":transcript")
        (when matched
-         (let* ((transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
-                                     (claw-lisp.core.runtime:session-transcript-path runtime session)))
+         (let* ((transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session))
                 (trimmed-args (and args (string-trim '(#\Space #\Tab) args)))
                 (parts (and trimmed-args
                             (remove-if (lambda (part) (zerop (length part)))
@@ -1302,12 +1287,45 @@ observability records, are intentionally dropped in runner v0."
             (error (e)
               (format t "Resume failed: ~A~%" e)
               (values t session)))))))
-    ((or (string= command ":tasks")
-         (string= command ":agents")
-         (string= command ":agent")
-         (and (>= (length command) 7)
-              (string= ":agent " (subseq command 0 7))))
-     (format t "Child-agent orchestration commands are not included in the public Achatina build.~%")
+    ((string= command ":tasks")
+     (let ((snapshots (claw-lisp.core.runtime:list-child-progress-snapshots runtime session)))
+       (if snapshots
+           (progn
+             (format t "Background tasks:~%")
+             (dolist (snapshot snapshots)
+               (format t "  - [~A] ~A  status=~A  messages=~D  tools=~D~%"
+                       (%background-status-bucket
+                        (claw-lisp.core.domain:child-progress-snapshot-status snapshot))
+                       (claw-lisp.core.domain:child-progress-snapshot-child-id snapshot)
+                       (claw-lisp.core.domain:child-progress-snapshot-status snapshot)
+                       (claw-lisp.core.domain:child-progress-snapshot-messages-count snapshot)
+                       (claw-lisp.core.domain:child-progress-snapshot-tool-calls-count snapshot))))
+           (format t "No background tasks right now.~%")))
+     (values t session))
+    ((string= command ":agents")
+     (let ((snapshots (claw-lisp.core.runtime:list-child-progress-snapshots runtime session)))
+       (if snapshots
+           (progn
+             (format t "Child agents:~%")
+             (dolist (snapshot snapshots)
+               (%print-child-snapshot-line snapshot)))
+           (format t "No child agents tracked yet.~%")))
+     (values t session))
+    ((string= command ":agent")
+     (format t "Usage: :agent <child-id>~%")
+     (values t session))
+    ((and (>= (length command) 7)
+          (string= ":agent " (subseq command 0 7)))
+     (let* ((child-id (string-trim '(#\Space #\Tab) (subseq command 7)))
+            (snapshot (and (> (length child-id) 0)
+                           (claw-lisp.core.runtime:child-progress-snapshot runtime session child-id))))
+       (cond
+         ((zerop (length child-id))
+          (format t "Usage: :agent <child-id>~%"))
+         (snapshot
+          (%print-child-snapshot-detail runtime session snapshot))
+         (t
+          (format t "No child agent found: ~A~%" child-id))))
      (values t session))
     (t (values nil nil))))
 

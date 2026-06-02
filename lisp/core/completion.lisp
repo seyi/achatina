@@ -31,7 +31,8 @@
       (let ((verify-passed (claw-lisp.core.phases:get-last-verify-result session))
             (last-turn-tools (claw-lisp.core.phases:get-last-turn-tool-count session)))
         (or verify-passed
-            (zerop last-turn-tools))))))
+            (and (integerp last-turn-tools)
+                 (zerop last-turn-tools)))))))
 
 (defun has-text-content-p (response)
   "Return T if RESPONSE contains text content blocks."
@@ -91,8 +92,9 @@
             (not (has-tool-calls-p last-response)))
        (values t "model-confirmed-completion"))
 
-      ;; Trigger 3: Max iterations reached
-      ((>= turn-count +max-coding-task-iterations+)
+      ;; Trigger 3: Max iterations reached while in verify phase
+      ((and (eq phase :verify)
+            (>= turn-count +max-coding-task-iterations+))
        (values t "max-iterations"))
 
       ;; No trigger
@@ -101,10 +103,12 @@
 (defun maybe-auto-complete (session last-response)
   "Check completion triggers and auto-transition to :complete if met.
 
-   Returns (values completed-p reason) where completed-p is T if session
+  Returns (values completed-p reason) where completed-p is T if session
    was transitioned to :complete, and reason is the completion reason."
   (multiple-value-bind (triggered reason)
       (check-completion-triggers session last-response)
-    (when triggered
-      (transition-to-complete session reason)
-      (values t reason))))
+    (if triggered
+        (progn
+          (transition-to-complete session reason)
+          (values t reason))
+        (values nil nil))))
