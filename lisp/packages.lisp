@@ -1863,6 +1863,20 @@
    #:tool-valid-for-phase-p
    #:check-tool-phase-compatibility))
 
+(defpackage #:claw-lisp.core.phase-progression
+  (:use #:cl)
+  (:export
+   ;; Constants
+   #:+read-only-stagnation-threshold+
+   #:+edit-without-verify-threshold+
+   ;; Analysis
+   #:classify-tool-calls-for-phase
+   #:recommend-phase-transition
+   ;; Transcript
+   #:emit-phase-transition-event
+   ;; Integration
+   #:apply-progression-policy))
+
 (defpackage #:claw-lisp.core.agent-mailbox
   (:use #:cl)
   (:import-from #:claw-lisp.core.domain
