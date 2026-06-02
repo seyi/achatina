@@ -1815,6 +1815,21 @@
    ;; Summary
    #:phase-summary))
 
+(defpackage #:claw-lisp.core.completion
+  (:use #:cl)
+  (:export
+   ;; Constants
+   #:+max-coding-task-iterations+
+   ;; Completion predicates
+   #:coding-task-complete-p
+   #:has-text-content-p
+   #:has-tool-calls-p
+   ;; Completion transition
+   #:transition-to-complete
+   ;; Completion triggers
+   #:check-completion-triggers
+   #:maybe-auto-complete))
+
 (defpackage #:claw-lisp.core.agent-mailbox
   (:use #:cl)
   (:import-from #:claw-lisp.core.domain
