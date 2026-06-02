@@ -11,7 +11,7 @@
 ;;   make repl
 
 (defparameter +cli-version+ "0.1.0"
-  "Achatina CLI version.")
+  "Claw Lisp CLI version.")
 
 (defparameter +cli-welcome-message+
   "Welcome to Achatina CLI ~A.
@@ -481,11 +481,17 @@ observability records, are intentionally dropped in runner v0."
   (let ((config (claw-lisp.config:load-runtime-config
                  :overrides (list :default-provider provider
                                   :default-model model))))
-    (let ((transcripts-root (%request-environment-path request :transcript_root))
+    (let ((state-root (%request-environment-path request :state_root))
+          (data-root (%request-environment-path request :data_root))
+          (transcripts-root (%request-environment-path request :transcript_root))
           (memory-root (%request-environment-path request :memory_root))
           (artifacts-root (%request-environment-path request :artifacts_root))
           (cas-objects-root (%request-environment-path request :cas_objects_root))
           (cas-ref-root (%request-environment-path request :cas_ref_root)))
+      (when state-root
+        (claw-lisp.config:apply-state-root config state-root))
+      (when data-root
+        (claw-lisp.config:apply-state-root config data-root))
       (when transcripts-root
         (setf (claw-lisp.config:runtime-config-transcripts-root config) transcripts-root))
       (when memory-root
@@ -1051,7 +1057,10 @@ observability records, are intentionally dropped in runner v0."
                          (format t "  (none registered)~%")))))
            (values t session)))))
     ((string= command ":memory")
-     (let ((path (claw-lisp.core.runtime:session-memory-path-for-session runtime session)))
+     (let ((path (or (claw-lisp.storage.session-memory:session-memory-existing-path
+                      (claw-lisp.core.runtime:runtime-settings runtime)
+                      (claw-lisp.core.domain:agent-session-id session))
+                     (claw-lisp.core.runtime:session-memory-path-for-session runtime session))))
        (format t "Session memory status:~%")
        (format t "  Path: ~A~%" path)
        (if (probe-file path)
@@ -1066,7 +1075,10 @@ observability records, are intentionally dropped in runner v0."
            (format t "  Exists: no~%")))
      (values t session))
     ((string= command ":memory-content")
-     (let ((path (claw-lisp.core.runtime:session-memory-path-for-session runtime session)))
+     (let ((path (or (claw-lisp.storage.session-memory:session-memory-existing-path
+                      (claw-lisp.core.runtime:runtime-settings runtime)
+                      (claw-lisp.core.domain:agent-session-id session))
+                     (claw-lisp.core.runtime:session-memory-path-for-session runtime session))))
        (if (probe-file path)
            (progn
              (format t "Session memory at: ~A~%" path)
@@ -1143,7 +1155,8 @@ observability records, are intentionally dropped in runner v0."
                                   :error)))
                 (providers (claw-lisp.core.runtime:list-provider-names runtime))
                 (tools (claw-lisp.core.runtime:list-tool-names runtime))
-                (transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session)))
+                (transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
+                                     (claw-lisp.core.runtime:session-transcript-path runtime session))))
            (format t "Runtime diagnostics:~%")
            (format t "  Session id: ~A~%" (claw-lisp.core.domain:agent-session-id session))
            (format t "  Provider: ~A~%" (claw-lisp.core.domain:agent-session-provider session))
@@ -1169,7 +1182,8 @@ observability records, are intentionally dropped in runner v0."
             (state (claw-lisp.core.domain:agent-session-state session))
             (failures (getf state :compaction-failure-count 0))
             (circuit-open (claw-lisp.core.runtime:compaction-circuit-open-p session))
-            (transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session)))
+            (transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
+                                 (claw-lisp.core.runtime:session-transcript-path runtime session))))
        (multiple-value-bind (last-event-line transcript-error missing-event-count)
            (%find-last-compaction-event-line transcript-path)
        (format t "Compaction status:~%")
@@ -1194,7 +1208,8 @@ observability records, are intentionally dropped in runner v0."
      (values t session))
     ((multiple-value-bind (matched args) (%command-dispatch command ":transcript")
        (when matched
-         (let* ((transcript-path (claw-lisp.core.runtime:session-transcript-path runtime session))
+         (let* ((transcript-path (or (claw-lisp.core.runtime:session-transcript-existing-path runtime session)
+                                     (claw-lisp.core.runtime:session-transcript-path runtime session)))
                 (trimmed-args (and args (string-trim '(#\Space #\Tab) args)))
                 (parts (and trimmed-args
                             (remove-if (lambda (part) (zerop (length part)))
@@ -1414,7 +1429,7 @@ observability records, are intentionally dropped in runner v0."
     (values runtime session)))
 
 (defun run-cli (&key (provider "anthropic") (model "claude-sonnet-4-6") (project-root nil))
-  "Run the Achatina CLI.
+  "Run the Claw Lisp CLI.
 
    PROVIDER is the provider name (default: \"anthropic\").
    MODEL is the model name (default: \"claude-sonnet-4-6\").
