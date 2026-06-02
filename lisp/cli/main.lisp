@@ -5,16 +5,16 @@
 ;; Provides a REPL (Read-Eval-Print Loop) for interacting with Claw.
 ;;
 ;; Usage:
-;;   sbcl --load claw-lisp-cli.asd --eval "(claw-lisp.cli:run-cli)"
+;;   sbcl --load achatina-cli.asd --eval "(claw-lisp.cli:run-cli)"
 ;;
 ;; Or from the Makefile:
 ;;   make repl
 
 (defparameter +cli-version+ "0.1.0"
-  "Claw Lisp CLI version.")
+  "Achatina CLI version.")
 
 (defparameter +cli-welcome-message+
-  "Welcome to Claw Lisp CLI ~A.
+  "Welcome to Achatina CLI ~A.
 Type your message and press Enter. Use :help for commands.
 Type :quit or Ctrl+D to exit.~%"
   "Welcome message displayed at CLI startup.")
@@ -244,8 +244,8 @@ non-interactive runner flags."
 
 (defun print-usage ()
   "Print top-level CLI usage."
-  (format t "Usage: claw-lisp [--json-run [runner flags]]~%")
-  (format t "       claw-lisp            ; interactive REPL~%")
+  (format t "Usage: achatina [--json-run [runner flags]]~%")
+  (format t "       achatina            ; interactive REPL~%")
   (format t "General flags:~%")
   (format t "  --help~%")
   (format t "Runner flags:~%")
@@ -1414,7 +1414,7 @@ observability records, are intentionally dropped in runner v0."
     (values runtime session)))
 
 (defun run-cli (&key (provider "anthropic") (model "claude-sonnet-4-6") (project-root nil))
-  "Run the Claw Lisp CLI.
+  "Run the Achatina CLI.
 
    PROVIDER is the provider name (default: \"anthropic\").
    MODEL is the model name (default: \"claude-sonnet-4-6\").
