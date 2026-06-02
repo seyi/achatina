@@ -2,216 +2,191 @@
 
 ;;; FND-002 Completion Detection Tests
 
-(def-test test-coding-task-complete-p-verify-passed ()
-  "Test that coding-task-complete-p returns T when verify passed."
+(defun test-coding-task-complete-p-verify-passed ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-001"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
+                  :id "tc-001" :provider :mock :model "m" :conversation nil :state nil)))
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :inspect "start")
     (claw-lisp.core.phases:transition-phase session :edit "found issue")
     (claw-lisp.core.phases:transition-phase session :verify "done editing")
     (claw-lisp.core.phases:set-last-verify-result session t)
     (claw-lisp.core.phases:transition-phase session :complete "verify passed")
+    (%assert (claw-lisp.core.completion:coding-task-complete-p session)
+             "Should be complete when verify passed and in :complete phase")
+    (format t "  ✓ coding-task-complete-p (verify passed)~%")))
 
-    (is (claw-lisp.core.completion:coding-task-complete-p session)
-        "Should be complete when verify passed and in :complete phase")))
-
-(def-test test-coding-task-complete-p-no-tool-calls ()
-  "Test that coding-task-complete-p returns T when no tool calls in last turn."
+(defun test-coding-task-complete-p-no-tool-calls ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-002"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
+                  :id "tc-002" :provider :mock :model "m" :conversation nil :state nil)))
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :inspect "start")
     (claw-lisp.core.phases:transition-phase session :edit "found issue")
     (claw-lisp.core.phases:transition-phase session :verify "done editing")
     (claw-lisp.core.phases:set-last-turn-tool-count session 0)
     (claw-lisp.core.phases:transition-phase session :complete "model finished")
+    (%assert (claw-lisp.core.completion:coding-task-complete-p session)
+             "Should be complete when no tool calls and in :complete phase")
+    (format t "  ✓ coding-task-complete-p (no tool calls)~%")))
 
-    (is (claw-lisp.core.completion:coding-task-complete-p session)
-        "Should be complete when no tool calls and in :complete phase")))
-
-(def-test test-coding-task-complete-p-not-complete-phase ()
-  "Test that coding-task-complete-p returns NIL when not in :complete phase."
+(defun test-coding-task-complete-p-nil-tool-count ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-003"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
-    (claw-lisp.core.phases:initialize-phase-state session)
-    (claw-lisp.core.phases:transition-phase session :inspect "start")
-    (claw-lisp.core.phases:set-last-verify-result session t)
-
-    (is (not (claw-lisp.core.completion:coding-task-complete-p session))
-        "Should not be complete when in :inspect phase")))
-
-(def-test test-has-text-content-p ()
-  "Test detection of text content in responses."
-  ;; Response with text block
-  (let ((response-with-text '(:content ((:type :text :text "Hello world")))))
-    (is (claw-lisp.core.completion:has-text-content-p response-with-text)
-        "Should detect text content"))
-
-  ;; Response without text block
-  (let ((response-no-text '(:content ((:type :tool_use :id "1" :name "read")))))
-    (is (not (claw-lisp.core.completion:has-text-content-p response-no-text))
-        "Should not detect text when only tool uses"))
-
-  ;; NIL response
-  (is (not (claw-lisp.core.completion:has-text-content-p nil))
-      "Should handle nil response"))
-
-(def-test test-has-tool-calls-p ()
-  "Test detection of tool calls in responses."
-  ;; Response with tool use
-  (let ((response-with-tool '(:content ((:type :tool_use :id "1" :name "read")))))
-    (is (claw-lisp.core.completion:has-tool-calls-p response-with-tool)
-        "Should detect tool calls"))
-
-  ;; Response without tool use
-  (let ((response-no-tool '(:content ((:type :text :text "Hello")))))
-    (is (not (claw-lisp.core.completion:has-tool-calls-p response-no-tool))
-        "Should not detect tools when only text"))
-
-  ;; NIL response
-  (is (not (claw-lisp.core.completion:has-tool-calls-p nil))
-      "Should handle nil response"))
-
-(def-test test-transition-to-complete ()
-  "Test transition-to-complete function."
-  (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-004"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
+                  :id "tc-002b" :provider :mock :model "m" :conversation nil :state nil)))
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :inspect "start")
     (claw-lisp.core.phases:transition-phase session :edit "found issue")
     (claw-lisp.core.phases:transition-phase session :verify "done editing")
+    (claw-lisp.core.phases:set-last-turn-tool-count session nil)
+    (claw-lisp.core.phases:transition-phase session :complete "model finished")
+    (%assert (not (claw-lisp.core.completion:coding-task-complete-p session))
+             "Should not be complete when tool-count is NIL")
+    (format t "  ✓ coding-task-complete-p (nil tool-count safe)~%")))
 
-    ;; Transition to complete
+(defun test-coding-task-complete-p-not-complete-phase ()
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "tc-003" :provider :mock :model "m" :conversation nil :state nil)))
+    (claw-lisp.core.phases:initialize-phase-state session)
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (claw-lisp.core.phases:set-last-verify-result session t)
+    (%assert (not (claw-lisp.core.completion:coding-task-complete-p session))
+             "Should not be complete when in :inspect phase")
+    (format t "  ✓ coding-task-complete-p (not :complete phase)~%")))
+
+(defun test-has-text-content-p ()
+  (%assert (claw-lisp.core.completion:has-text-content-p
+            '(:content ((:type :text :text "Hello"))))
+           "Should detect text content in plist response")
+  (%assert (not (claw-lisp.core.completion:has-text-content-p
+                 '(:content ((:type :tool_use :id "1" :name "read")))))
+           "Should not detect text when only tool uses")
+  (%assert (not (claw-lisp.core.completion:has-text-content-p nil))
+           "Should handle nil response")
+  (format t "  ✓ has-text-content-p~%"))
+
+(defun test-has-tool-calls-p ()
+  (%assert (claw-lisp.core.completion:has-tool-calls-p
+            '(:content ((:type :tool_use :id "1" :name "read"))))
+           "Should detect tool calls")
+  (%assert (not (claw-lisp.core.completion:has-tool-calls-p
+                 '(:content ((:type :text :text "Hello")))))
+           "Should not detect tools when only text")
+  (%assert (not (claw-lisp.core.completion:has-tool-calls-p nil))
+           "Should handle nil response")
+  (format t "  ✓ has-tool-calls-p~%"))
+
+(defun test-transition-to-complete ()
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "tc-004" :provider :mock :model "m" :conversation nil :state nil)))
+    (claw-lisp.core.phases:initialize-phase-state session)
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (claw-lisp.core.phases:transition-phase session :edit "found issue")
+    (claw-lisp.core.phases:transition-phase session :verify "done editing")
     (claw-lisp.core.completion:transition-to-complete session "test-reason")
-
-    (is (eq :complete (claw-lisp.core.phases:get-current-phase session))
-        "Should be in :complete phase")
-
-    ;; Check history
+    (%assert (eq :complete (claw-lisp.core.phases:get-current-phase session))
+             "Should be in :complete phase")
     (let ((history (claw-lisp.core.phases:get-phase-history session)))
-      (is (> (length history) 0) "Should have history")
-      (let ((recent (first history)))
-        (is (eq :complete (getf recent :phase))
-            "Most recent transition should be to :complete")
-        (is (string= "test-reason" (getf recent :trigger))
-            "Reason should be recorded in history")))))
+      (%assert (> (length history) 0) "Should have history")
+      (%assert (eq :complete (getf (first history) :phase))
+               "Most recent should be :complete")
+      (%assert (string= "test-reason" (getf (first history) :trigger))
+               "Reason should be recorded"))
+    (format t "  ✓ transition-to-complete~%")))
 
-(def-test test-check-completion-triggers-verify-passed ()
-  "Test completion trigger: verify passed."
+(defun test-check-completion-triggers-verify-passed ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-005"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
+                  :id "tc-005" :provider :mock :model "m" :conversation nil :state nil)))
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :verify "checking")
     (claw-lisp.core.phases:set-last-verify-result session t)
-
     (multiple-value-bind (triggered reason)
         (claw-lisp.core.completion:check-completion-triggers session nil)
-      (is triggered "Trigger should fire when verify passed")
-      (is (string= "verify-passed" reason)
-          "Reason should be verify-passed"))))
+      (%assert triggered "Trigger should fire when verify passed")
+      (%assert (string= "verify-passed" reason) "Reason should be verify-passed"))
+    (format t "  ✓ trigger: verify-passed~%")))
 
-(def-test test-check-completion-triggers-model-confirmed ()
-  "Test completion trigger: model confirmed completion with text."
+(defun test-check-completion-triggers-model-confirmed ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-006"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil))
+                  :id "tc-006" :provider :mock :model "m" :conversation nil :state nil))
         (response '(:content ((:type :text :text "Task complete")))))
-
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :verify "checking")
-
     (multiple-value-bind (triggered reason)
         (claw-lisp.core.completion:check-completion-triggers session response)
-      (is triggered "Trigger should fire when model confirms with text")
-      (is (string= "model-confirmed-completion" reason)
-          "Reason should be model-confirmed-completion"))))
+      (%assert triggered "Trigger should fire when model confirms with text")
+      (%assert (string= "model-confirmed-completion" reason) "Reason should be model-confirmed"))
+    (format t "  ✓ trigger: model-confirmed-completion~%")))
 
-(def-test test-check-completion-triggers-max-iterations ()
-  "Test completion trigger: max iterations exceeded."
+(defun test-check-completion-triggers-max-iterations ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-007"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil))
+                  :id "tc-007" :provider :mock :model "m" :conversation nil :state nil))
         (max-iters claw-lisp.core.completion:+max-coding-task-iterations+))
-
     (claw-lisp.core.phases:initialize-phase-state session)
-    (claw-lisp.core.phases:transition-phase session :inspect "start")
-
-    ;; Simulate many turns
-    (dotimes (i (+ max-iters 1))
+    (claw-lisp.core.phases:transition-phase session :verify "checking")
+    (dotimes (i (1- max-iters))
       (claw-lisp.core.phases:increment-turn-count session))
-
     (multiple-value-bind (triggered reason)
         (claw-lisp.core.completion:check-completion-triggers session nil)
-      (is triggered "Trigger should fire when max iterations exceeded")
-      (is (string= "max-iterations" reason)
-          "Reason should be max-iterations"))))
+      (%assert (not triggered) "Should not fire before max iterations")
+      (%assert (null reason) "Reason nil before max"))
+    (claw-lisp.core.phases:increment-turn-count session)
+    (multiple-value-bind (triggered reason)
+        (claw-lisp.core.completion:check-completion-triggers session nil)
+      (%assert triggered "Should fire at max iterations")
+      (%assert (string= "max-iterations" reason) "Reason should be max-iterations"))
+    (format t "  ✓ trigger: max-iterations~%")))
 
-(def-test test-check-completion-triggers-no-trigger ()
-  "Test that no trigger fires when conditions not met."
+(defun test-check-completion-triggers-no-trigger ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-008"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil))
+                  :id "tc-008" :provider :mock :model "m" :conversation nil :state nil))
         (response '(:content ((:type :tool_use :id "1" :name "read")))))
-
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :inspect "start")
-
     (multiple-value-bind (triggered reason)
         (claw-lisp.core.completion:check-completion-triggers session response)
-      (is (not triggered) "No trigger should fire")
-      (is (null reason) "Reason should be nil"))))
+      (%assert (not triggered) "No trigger should fire")
+      (%assert (null reason) "Reason should be nil"))
+    (format t "  ✓ no trigger when conditions not met~%")))
 
-(def-test test-maybe-auto-complete ()
-  "Test maybe-auto-complete transitions when trigger fires."
+(defun test-maybe-auto-complete ()
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "test-completion-009"
-                  :provider :mock
-                  :model "test-model"
-                  :conversation nil
-                  :state nil)))
-
+                  :id "tc-009" :provider :mock :model "m" :conversation nil :state nil)))
     (claw-lisp.core.phases:initialize-phase-state session)
     (claw-lisp.core.phases:transition-phase session :verify "checking")
     (claw-lisp.core.phases:set-last-verify-result session t)
-
     (multiple-value-bind (completed reason)
         (claw-lisp.core.completion:maybe-auto-complete session nil)
-      (is completed "Should complete when trigger fires")
-      (is (string= "verify-passed" reason) "Should return reason")
-      (is (eq :complete (claw-lisp.core.phases:get-current-phase session))
-          "Session should be in :complete phase"))))
+      (%assert completed "Should complete when trigger fires")
+      (%assert (string= "verify-passed" reason) "Should return reason")
+      (%assert (eq :complete (claw-lisp.core.phases:get-current-phase session))
+               "Session should be in :complete phase"))
+    (format t "  ✓ maybe-auto-complete~%")))
+
+(defun test-maybe-auto-complete-no-trigger ()
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "tc-010" :provider :mock :model "m" :conversation nil :state nil))
+        (response '(:content ((:type :tool_use :id "1" :name "read")))))
+    (claw-lisp.core.phases:initialize-phase-state session)
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (multiple-value-bind (completed reason)
+        (claw-lisp.core.completion:maybe-auto-complete session response)
+      (%assert (not completed) "Should not complete")
+      (%assert (null reason) "Reason should be NIL")
+      (%assert (eq :inspect (claw-lisp.core.phases:get-current-phase session))
+               "Phase should remain unchanged"))
+    (format t "  ✓ maybe-auto-complete (no trigger)~%")))
+
+(defun run-completion-tests ()
+  (format t "~%=== FND-002 Completion Tests ===~%~%")
+  (test-coding-task-complete-p-verify-passed)
+  (test-coding-task-complete-p-no-tool-calls)
+  (test-coding-task-complete-p-nil-tool-count)
+  (test-coding-task-complete-p-not-complete-phase)
+  (test-has-text-content-p)
+  (test-has-tool-calls-p)
+  (test-transition-to-complete)
+  (test-check-completion-triggers-verify-passed)
+  (test-check-completion-triggers-model-confirmed)
+  (test-check-completion-triggers-max-iterations)
+  (test-check-completion-triggers-no-trigger)
+  (test-maybe-auto-complete)
+  (test-maybe-auto-complete-no-trigger)
+  (format t "~%=== All FND-002 Completion Tests Passed! ===~%"))
