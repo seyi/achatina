@@ -73,26 +73,85 @@
                  "Violation should report current phase")))
     (format t "  ✓ phase violation signaled for wrong phase~%")))
 
+(defun test-file-replace-valid-phases ()
+  (let ((tool (make-instance 'claw-lisp.tools.file-replace::file-replace-tool
+                             :name "file-replace" :description "replace")))
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :edit)
+             "file-replace should be valid in :edit")
+    (%assert (not (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :inspect))
+             "file-replace should not be valid in :inspect")
+    (%assert (not (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :verify))
+             "file-replace should not be valid in :verify")
+    (%assert (not (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :complete))
+             "file-replace should not be valid in :complete")
+    (format t "  ✓ file-replace valid only in :edit~%")))
+
+(defun test-grep-valid-phases ()
+  (let ((tool (make-instance 'claw-lisp.tools.grep::grep-tool
+                             :name "grep" :description "grep")))
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :inspect)
+             "grep should be valid in :inspect")
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :edit)
+             "grep should be valid in :edit")
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :verify)
+             "grep should be valid in :verify")
+    (%assert (not (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :complete))
+             "grep should not be valid in :complete")
+    (format t "  ✓ grep valid in :inspect, :edit, :verify~%")))
+
+(defun test-glob-valid-phases ()
+  (let ((tool (make-instance 'claw-lisp.tools.glob::glob-tool
+                             :name "glob" :description "glob")))
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :inspect)
+             "glob should be valid in :inspect")
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :edit)
+             "glob should be valid in :edit")
+    (%assert (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :verify)
+             "glob should be valid in :verify")
+    (%assert (not (claw-lisp.core.tool-phases:tool-valid-for-phase-p tool :complete))
+             "glob should not be valid in :complete")
+    (format t "  ✓ glob valid in :inspect, :edit, :verify~%")))
+
+(defun test-positive-path-compatibility-check ()
+  (let ((tool (make-instance 'claw-lisp.tools.file-write::file-write-tool
+                             :name "file-write" :description "write"))
+        (session (claw-lisp.core.domain:make-agent-session
+                  :id "positive-test" :provider :mock :model "m"
+                  :conversation nil :state nil)))
+    (claw-lisp.core.phases:initialize-phase-state session)
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (claw-lisp.core.phases:transition-phase session :edit "editing")
+
+    ;; file-write in :edit should succeed without signaling
+    (claw-lisp.core.tool-phases:check-tool-phase-compatibility tool session)
+    (format t "  ✓ positive path: file-write valid in :edit (no signal)~%")))
+
 (defun test-no-violation-when-no-phase ()
   (let ((tool (make-instance 'claw-lisp.tools.file-write::file-write-tool
                              :name "file-write" :description "write"))
         (session (claw-lisp.core.domain:make-agent-session
                   :id "no-phase-test" :provider :mock :model "m"
-                  :conversation nil :state nil)))
+                  :conversation nil :state nil))
+        (violation-signaled nil))
     ;; No phase initialized — should be permissive
     (handler-case
-        (progn
-          (claw-lisp.core.tool-phases:check-tool-phase-compatibility tool session)
-          (format t "  ✓ no violation when phase not set (permissive)~%"))
-      (error (e)
-        (%assert nil "Should not signal when no phase set: ~A" e)))))
+        (claw-lisp.core.tool-phases:check-tool-phase-compatibility tool session)
+      (claw-lisp.core.conditions:phase-violation-error ()
+        (setf violation-signaled t)))
+    (%assert (not violation-signaled)
+             "Should not signal phase-violation-error when no phase set")
+    (format t "  ✓ no violation when phase not set (permissive)~%")))
 
 (defun run-tool-phases-tests ()
   (format t "~%=== FND-004 Tool Phase Compatibility Tests ===~%~%")
   (test-file-read-valid-phases)
   (test-file-write-valid-phases)
+  (test-file-replace-valid-phases)
+  (test-grep-valid-phases)
+  (test-glob-valid-phases)
   (test-shell-command-valid-phases)
   (test-echo-tool-valid-all-phases)
   (test-phase-violation-signaled)
+  (test-positive-path-compatibility-check)
   (test-no-violation-when-no-phase)
   (format t "~%=== All FND-004 Tests Passed! ===~%"))
