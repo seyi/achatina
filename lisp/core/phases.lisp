@@ -122,7 +122,8 @@
 
    Signals INVALID-PHASE-TRANSITION error if transition is not allowed.
 
-   Optimized to batch all state mutations into a single plist rebuild."
+   Optimized to batch all state mutations into a single plist rebuild,
+   reducing intermediate copies from O(4n) to O(n). Not thread-safe."
   (let* ((old-phase (get-current-phase session))
          (timestamp (get-universal-time))
          (old-state (claw-lisp.core.domain:agent-session-state session)))

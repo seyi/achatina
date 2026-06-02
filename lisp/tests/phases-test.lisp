@@ -221,4 +221,49 @@
     ;; History should be capped at max
     (let ((history (claw-lisp.core.phases:get-phase-history session)))
       (is (<= (length history) max-entries)
-          "Phase history should not exceed max entries"))))
+          "Phase history should not exceed max entries")
+
+      ;; Verify eviction order: newest entries retained, oldest dropped
+      (when (> (length history) 0)
+        (let ((most-recent (first history)))
+          (is (eq (getf most-recent :phase) :complete)
+              "Most recent transition should be at head of history")
+
+          ;; Verify early transitions are gone (they should have been evicted)
+          (let ((has-start (find "start" history
+                                 :key (lambda (entry) (getf entry :trigger))
+                                 :test #'string=)))
+            (is (null has-start)
+                "Oldest transition should have been evicted")))))))
+
+(def-test test-transition-preserves-unrelated-state ()
+  "Test that phase transitions preserve unrelated session state keys."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "test-session-008"
+                  :provider :mock
+                  :model "test-model"
+                  :conversation nil
+                  :state nil)))
+
+    (claw-lisp.core.phases:initialize-phase-state session)
+
+    ;; Add sentinel keys to session state
+    (let ((state (claw-lisp.core.domain:agent-session-state session)))
+      (setf (getf state :custom-sentinel-1) "preserved-value-1")
+      (setf (getf state :custom-sentinel-2) 42)
+      (setf (getf state :custom-sentinel-3) '(:nested :data))
+      (setf (claw-lisp.core.domain:agent-session-state session) state))
+
+    ;; Perform multiple phase transitions
+    (claw-lisp.core.phases:transition-phase session :inspect "start")
+    (claw-lisp.core.phases:transition-phase session :edit "found issue")
+    (claw-lisp.core.phases:transition-phase session :verify "done editing")
+
+    ;; Verify sentinel keys survived all transitions
+    (let ((final-state (claw-lisp.core.domain:agent-session-state session)))
+      (is (string= "preserved-value-1" (getf final-state :custom-sentinel-1))
+          "String sentinel should be preserved")
+      (is (= 42 (getf final-state :custom-sentinel-2))
+          "Integer sentinel should be preserved")
+      (is (equal '(:nested :data) (getf final-state :custom-sentinel-3))
+          "List sentinel should be preserved"))))
