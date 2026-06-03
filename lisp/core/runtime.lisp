@@ -66,8 +66,16 @@
 (defparameter +compaction-failure-limit+ 3
   "Maximum consecutive compaction failures before the baseline circuit opens.")
 
-(defparameter +max-provider-tool-iterations+ 6
-  "Bound the baseline provider tool loop to avoid infinite local retries.")
+(defparameter +max-provider-tool-iterations+ 12
+  "Bound the baseline provider tool loop to avoid infinite local retries.
+
+   Reaching this bound is NOT an error: the stagnation guard
+   (assess-loop-progress) already fails closed on genuinely stuck, no-progress
+   loops at a much lower count, so a loop that reaches this bound was making
+   progress (writing/verifying) but took many turns. The loop returns the last
+   response gracefully when the bound is hit. The value allows a realistic
+   coding turn budget: inspect, edit, verify, re-edit, re-verify, and a final
+   confirmation turn.")
 
 (defparameter +max-stagnant-read-only-tool-iterations+ 2
   "Maximum consecutive read-only tool-call turns before the runtime fails closed.")
@@ -1069,7 +1077,8 @@ that starts with '[' and contains 'error' or 'timed out'."
                             :project-root (runtime-effective-project-root runtime)
                             :tool-registry (runtime-tool-registry runtime)
                             :model model)))
-       (loop for iteration from 1 to +max-provider-tool-iterations+
+       (loop with last-response = nil
+             for iteration from 1 to +max-provider-tool-iterations+
              do
                 (let* ((supports-tools (model-supports-p (runtime-model-registry runtime)
                                                          model :tools))
@@ -1137,6 +1146,7 @@ that starts with '[' and contains 'error' or 'timed out'."
                                                                       :on-event on-event
                                                                       :system system-prompt)))))))
                        (tool-calls (response-tool-calls response)))
+                  (setf last-response response)
                   (append-assistant-message runtime session response)
                   (claw-lisp.core.phases:increment-turn-count session)
                   (claw-lisp.core.phases:set-last-turn-tool-count
@@ -1235,9 +1245,18 @@ that starts with '[' and contains 'error' or 'timed out'."
                   (unless tool-calls
                     (return response)))
              finally
-                (error "Provider tool loop exceeded ~D iterations for session ~A."
-                       +max-provider-tool-iterations+
-                       (claw-lisp.core.domain:agent-session-id session)))))))
+                ;; Reaching the iteration bound is a normal stop, not an error.
+                ;; The stagnation guard fails closed on stuck loops well before
+                ;; this point, so a loop that gets here was making progress but
+                ;; verbose. Return the last response so the runner reports the
+                ;; turn's actual outcome instead of an internal error.
+                (maybe-append-transcript-event
+                 session
+                 (session-transcript-path runtime session)
+                 (list :event "tool_loop_budget_reached"
+                       :session_id (claw-lisp.core.domain:agent-session-id session)
+                       :iterations +max-provider-tool-iterations+))
+                (return last-response))))))
 
 (defun default-tool-allowed-roots (config)
   "Return the baseline local roots allowed for filesystem tools."

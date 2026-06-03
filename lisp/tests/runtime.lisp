@@ -47,6 +47,39 @@
                                 :accessor shell-pivot-provider-tools-offered-on-final-turn)
    (path :initarg :path :reader shell-pivot-provider-path)))
 
+;; always-writing-provider: emits a successful file-write every turn and never
+;; stops. Successful writes keep resetting the stall counter, so the stagnation
+;; guard never fires — the loop runs to its iteration budget. Used to verify the
+;; budget is a graceful stop, not an error.
+(defclass always-writing-provider (claw-lisp.core.protocols:provider)
+  ((path :initarg :path :reader always-writing-provider-path)))
+
+(defmethod claw-lisp.core.protocols:send-turn
+    ((provider always-writing-provider) conversation &key model tools system)
+  (declare (ignore conversation model tools system))
+  (claw-lisp.core.domain:make-transport-response
+   :ok-p t :status 200 :assistant-text "" :raw-response "{}"
+   :provider "always-writing"
+   :tool-calls (list (list :id "w"
+                           :name "file-write"
+                           :input (list :path (always-writing-provider-path provider)
+                                        :text "x")))))
+
+(defmethod claw-lisp.core.protocols:stream-turn
+    ((provider always-writing-provider) conversation &key model tools on-event system)
+  (declare (ignore on-event))
+  (claw-lisp.core.protocols:send-turn provider conversation :model model :tools tools :system system))
+
+(defmethod claw-lisp.core.protocols:normalize-response
+    ((provider always-writing-provider) response)
+  (declare (ignore provider))
+  response)
+
+(defmethod claw-lisp.core.protocols:count-tokens
+    ((provider always-writing-provider) messages &key model)
+  (declare (ignore provider model))
+  (max 1 (length messages)))
+
 (defmethod claw-lisp.core.protocols:send-turn
     ((provider shell-pivot-provider) conversation &key model tools system)
   (declare (ignore conversation model system))
@@ -6004,6 +6037,43 @@
       (when (probe-file root)
         (uiop:delete-directory-tree root :validate t)))))
 
+(defun test-provider-tool-loop-budget-returns-gracefully ()
+  "Reaching the provider tool-iteration budget is a normal stop, not an error.
+   A provider that keeps making progress (a successful write every turn) never
+   trips the stagnation guard, so the loop runs to the budget; it must then
+   return the last response rather than signaling 'exceeded N iterations'."
+  (let* ((root (merge-pathnames
+                (format nil "claw-lisp-loop-budget-~A/" (get-universal-time))
+                #P"/tmp/"))
+         (target-file (merge-pathnames "workspace/target.txt" root))
+         (runtime (make-runtime))
+         provider)
+    (unwind-protect
+         (progn
+           (ensure-directories-exist target-file)
+           (setf provider (make-instance 'always-writing-provider
+                                         :name "always-writing"
+                                         :path (namestring target-file)))
+           (claw-lisp.core.runtime:register-provider runtime provider)
+           (register-tool runtime (make-file-write-tool))
+           (let* ((session (start-session runtime
+                                          :provider-name "always-writing"
+                                          :model "mock-model"
+                                          :session-id "loop-budget-graceful"))
+                  (conversation (claw-lisp.core.domain:agent-session-conversation session))
+                  (response
+                    (handler-case
+                        (progn
+                          (append-message conversation
+                                          (make-message :role :user :content "keep writing"))
+                          (claw-lisp.core.runtime:execute-provider-turn-loop runtime session provider))
+                      (error (c)
+                        (%assert nil "Loop budget should return gracefully, but errored: ~A" c)))))
+             (%assert response
+                      "Expected execute-provider-turn-loop to return the last response at the budget")))
+      (when (probe-file root)
+        (uiop:delete-directory-tree root :validate t)))))
+
 (defun test-stall-counter-unaffected-when-no-tool-calls ()
   "assess-loop-progress with no tool calls returns the current count and no nudge."
   (let ((session (claw-lisp.core.domain:make-agent-session
@@ -6384,6 +6454,7 @@
   (test-read-suppression-forces-write-after-stall)
   (test-stall-increments-on-no-write-turn-with-interleaved-shell)
   (test-stall-counter-unaffected-when-no-tool-calls)
+  (test-provider-tool-loop-budget-returns-gracefully)
   (test-failed-write-advances-stagnation-to-nudge-threshold)
   (test-successful-write-resets-stagnation)
   ;; Agent loop improvements: model-family dispatch and differential reflection
