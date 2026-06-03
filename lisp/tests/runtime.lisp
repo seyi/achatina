@@ -38,6 +38,59 @@
   (declare (ignore provider conversation model tools on-event system))
   (error "intentional provider failure"))
 
+;; shell-pivot-provider: 2 file-read turns, 1 echo turn, then records tools offered
+(defclass shell-pivot-provider (claw-lisp.core.protocols:provider)
+  ((call-count :initform 0 :accessor shell-pivot-provider-call-count)
+   (tools-offered-on-final-turn :initform nil
+                                :accessor shell-pivot-provider-tools-offered-on-final-turn)
+   (path :initarg :path :reader shell-pivot-provider-path)))
+
+(defmethod claw-lisp.core.protocols:send-turn
+    ((provider shell-pivot-provider) conversation &key model tools system)
+  (declare (ignore conversation model system))
+  (incf (shell-pivot-provider-call-count provider))
+  (let ((count (shell-pivot-provider-call-count provider)))
+    (cond
+      ((or (= count 1) (= count 2))
+       (claw-lisp.core.domain:make-transport-response
+        :ok-p t :status 200 :assistant-text "" :raw-response "{}"
+        :provider "shell-pivot"
+        :tool-calls
+        (list (list :id (format nil "toolu_read_~A" count)
+                    :name "file-read"
+                    :input (list :path (shell-pivot-provider-path provider))))))
+      ((= count 3)
+       (claw-lisp.core.domain:make-transport-response
+        :ok-p t :status 200 :assistant-text "" :raw-response "{}"
+        :provider "shell-pivot"
+        :tool-calls
+        (list (list :id "toolu_echo_01"
+                    :name "echo"
+                    :input (list :text "observational echo — not a write")))))
+      (t
+       (setf (shell-pivot-provider-tools-offered-on-final-turn provider) tools)
+       (claw-lisp.core.domain:make-transport-response
+        :ok-p t :status 200
+        :assistant-text "Stopping — no read tools available."
+        :raw-response "{}"
+        :provider "shell-pivot"
+        :tool-calls nil)))))
+
+(defmethod claw-lisp.core.protocols:stream-turn
+    ((provider shell-pivot-provider) conversation &key model tools on-event system)
+  (declare (ignore on-event))
+  (claw-lisp.core.protocols:send-turn provider conversation :model model :tools tools :system system))
+
+(defmethod claw-lisp.core.protocols:normalize-response
+    ((provider shell-pivot-provider) response)
+  (declare (ignore provider))
+  response)
+
+(defmethod claw-lisp.core.protocols:count-tokens
+    ((provider shell-pivot-provider) messages &key model)
+  (declare (ignore provider model))
+  (max 1 (length messages)))
+
 (defmacro %with-redefined-function ((name replacement) &body body)
   `(let ((old-fn (symbol-function ,name)))
      (unwind-protect
@@ -5728,6 +5781,66 @@
                        (claw-lisp.core.domain:message-content-text boundary-msg))
                "Boundary message should contain rendered IR content"))))
 
+(defun test-stagnation-not-reset-by-observational-shell-command ()
+  "Verify that an echo turn after nudge does not re-enable read-only tools."
+  (let* ((root (merge-pathnames
+                (format nil "claw-lisp-shell-pivot-stagnation-~A/" (get-universal-time))
+                #P"/tmp/"))
+         (target-file (merge-pathnames "workspace/target.txt" root))
+         (runtime (make-runtime))
+         provider)
+    (unwind-protect
+         (progn
+           (ensure-directories-exist target-file)
+           (with-open-file (s target-file :direction :output
+                               :if-exists :supersede :if-does-not-exist :create)
+             (write-string "hello" s))
+           (setf provider (make-instance 'shell-pivot-provider
+                                         :name "shell-pivot"
+                                         :path (namestring target-file)))
+           (claw-lisp.core.runtime:register-provider runtime provider)
+           (register-tool runtime (make-file-read-tool))
+           (register-tool runtime (make-echo-tool))
+           (let* ((session (start-session runtime
+                                          :provider-name "shell-pivot"
+                                          :model "mock-model"
+                                          :session-id "shell-pivot-stagnation"))
+                  (conversation (claw-lisp.core.domain:agent-session-conversation session)))
+             (append-message conversation
+                             (make-message :role :user :content "fix the file"))
+             (claw-lisp.core.runtime:execute-provider-turn-loop runtime session provider)
+             (let ((offered (shell-pivot-provider-tools-offered-on-final-turn provider)))
+               (%assert offered
+                        "Expected provider to be called a 4th time (recording offered tools)")
+               (%assert (not (member "file-read"
+                                     (mapcar (lambda (d) (getf d :name)) offered)
+                                     :test #'string=))
+                        "Expected file-read to be excluded on turn 4 after shell-pivot — stagnation must not reset on observational echo"))))
+      (when (probe-file root)
+        (uiop:delete-directory-tree root :validate t)))))
+
+(defun test-stagnation-resets-on-write-tool-call ()
+  "Verify that check-for-stagnant-read-only-tool-loop resets to 0 on a write tool."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "stagnation-write-reset"
+                  :provider "mock"
+                  :model "mock"
+                  :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
+    (claw-lisp.core.runtime::set-session-state-value
+     session :read-only-tool-loop-repeat-count 2)
+    (let ((tool-calls (list (list :id "w1" :name "file-write"
+                                  :input (list :path "f.py" :content "")))))
+      (multiple-value-bind (count nudge-p)
+          (claw-lisp.core.runtime::check-for-stagnant-read-only-tool-loop
+           session tool-calls)
+        (%assert (= 0 count)
+                 "Expected count=0 after file-write, got ~A" count)
+        (%assert (null nudge-p)
+                 "Expected no nudge after file-write, got ~A" nudge-p)
+        (%assert (= 0 (claw-lisp.core.runtime::session-state-value
+                       session :read-only-tool-loop-repeat-count 0))
+                 "Expected session state reset to 0 after write")))))
+
 (defun test-model-family-dispatch ()
   (%assert (eq :moonshot (claw-lisp.core.system-prompt:model-family "moonshotai/kimi-k2.6"))
            "Expected moonshotai/ -> :moonshot")
@@ -6085,6 +6198,9 @@
   (run-cas-integrity-tests)
   ;; Phase 10: CAS Artifact Facade
   (run-artifacts-tests)
+  ;; Agent loop improvements: stagnation reset fix
+  (test-stagnation-not-reset-by-observational-shell-command)
+  (test-stagnation-resets-on-write-tool-call)
   ;; Agent loop improvements: model-family dispatch and differential reflection
   (test-model-family-dispatch)
   (test-build-system-prompt-selects-directive-for-kimi)

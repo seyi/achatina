@@ -78,6 +78,9 @@
 (defparameter +read-only-tool-names+ '("file-read" "glob" "grep")
   "Tool names treated as read-only for stagnant loop detection.")
 
+(defparameter +write-tool-names+ '("file-write" "file-replace")
+  "Tool names that represent substantive file modifications and reset stagnation state.")
+
 (defun register-tool (runtime tool)
   "Register TOOL under its declared name and return RUNTIME."
   (setf (gethash (claw-lisp.core.protocols:tool-name tool)
@@ -943,33 +946,42 @@ that starts with '[' and contains 'error' or 'timed out'."
   "Return true when TOOL-CALL is a read-only filesystem/query action."
   (member (getf tool-call :name) +read-only-tool-names+ :test #'string=))
 
+(defun write-tool-call-p (tool-call)
+  "Return true when TOOL-CALL is a file-modification action."
+  (member (getf tool-call :name) +write-tool-names+ :test #'string=))
+
 (defun check-for-stagnant-read-only-tool-loop (session tool-calls)
   "Track consecutive read-only tool-call turns and fail closed on stagnation.
 
-   Counts any turn where every tool call is read-only, regardless of which
-   files were read. This catches the common case where a model reads different
-   files each turn but never transitions to a write or test action."
-  (if (and tool-calls
-           (every #'read-only-tool-call-p tool-calls))
-      (let* ((signature (mapcar #'tool-call-signature tool-calls))
-             (repeat-count (session-state-value session :read-only-tool-loop-repeat-count 0))
-             (nudge-signature (session-state-value session :last-read-only-tool-loop-nudge-signature nil))
-             (new-count (1+ repeat-count))
-             (nudge-needed-p (and (>= new-count +read-only-tool-loop-nudge-threshold+)
-                                  (not (equal signature nudge-signature)))))
-        (set-session-state-value session :read-only-tool-loop-repeat-count new-count)
-        (when nudge-needed-p
-          (set-session-state-value session
-                                   :last-read-only-tool-loop-nudge-signature
-                                   signature))
-        (when (> new-count +max-stagnant-read-only-tool-iterations+)
-          (error "Repeated read-only tool loop detected for session ~A. The model reread the same inputs without progressing to write or test actions."
-                 (claw-lisp.core.domain:agent-session-id session)))
-        (values new-count nudge-needed-p))
-      (progn
-        (set-session-state-value session :read-only-tool-loop-repeat-count 0)
-        (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
-        (values 0 nil))))
+   Three-way classification per tool batch:
+   - All read-only  → increment stagnation counter; nudge/fail on threshold.
+   - Any write tool → genuine progress; reset counter to 0.
+   - Other (shell-command, echo, etc.) → maintain current count without
+     increment. Observational shell calls (e.g. 'cat file') must not be
+     treated as progress and must not re-enable read-only tools."
+  (cond
+    ((and tool-calls (every #'read-only-tool-call-p tool-calls))
+     (let* ((signature (mapcar #'tool-call-signature tool-calls))
+            (repeat-count (session-state-value session :read-only-tool-loop-repeat-count 0))
+            (nudge-signature (session-state-value session :last-read-only-tool-loop-nudge-signature nil))
+            (new-count (1+ repeat-count))
+            (nudge-needed-p (and (>= new-count +read-only-tool-loop-nudge-threshold+)
+                                 (not (equal signature nudge-signature)))))
+       (set-session-state-value session :read-only-tool-loop-repeat-count new-count)
+       (when nudge-needed-p
+         (set-session-state-value session
+                                  :last-read-only-tool-loop-nudge-signature
+                                  signature))
+       (when (> new-count +max-stagnant-read-only-tool-iterations+)
+         (error "Repeated read-only tool loop detected for session ~A. The model reread the same inputs without progressing to write or test actions."
+                (claw-lisp.core.domain:agent-session-id session)))
+       (values new-count nudge-needed-p)))
+    ((and tool-calls (some #'write-tool-call-p tool-calls))
+     (set-session-state-value session :read-only-tool-loop-repeat-count 0)
+     (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
+     (values 0 nil))
+    (t
+     (values (session-state-value session :read-only-tool-loop-repeat-count 0) nil))))
 
 (defun ensure-turn-not-in-flight (session)
   "Signal an error when SESSION already has a turn executing."
