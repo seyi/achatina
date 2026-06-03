@@ -988,6 +988,26 @@ that starts with '[' and contains 'error' or 'timed out'."
   (and (tool-name-mutation-p (claw-lisp.core.domain:tool-result-tool-name result))
        (tool-result-error-p result)))
 
+(defun turn-verification-status (new-results)
+  "Classify the verification outcome of a turn from its shell-command results.
+   The shell-command tool is the verification mechanism for coding tasks.
+   Returns :passed when the turn ran one or more shell-commands and all of them
+   succeeded, :failed when any shell-command errored, and NIL when the turn ran
+   no shell-command (no verification signal this turn).
+
+   Note: success/failure is inferred via TOOL-RESULT-ERROR-P (content-based)
+   because the shell tool does not yet surface an explicit exit status on the
+   tool-result. Step B (canonical ok-p) will make this exact."
+  (let ((shell-results
+          (remove-if-not
+           (lambda (r) (string= (claw-lisp.core.domain:tool-result-tool-name r)
+                                "shell-command"))
+           new-results)))
+    (cond
+      ((null shell-results) nil)
+      ((every (lambda (r) (not (tool-result-error-p r))) shell-results) :passed)
+      (t :failed))))
+
 (defun assess-loop-progress (session tool-calls new-results)
   "Unified per-turn progress assessment for the coding loop (design doc Step D).
 
@@ -1177,6 +1197,16 @@ that starts with '[' and contains 'error' or 'timed out'."
                                error-result)))))
                       (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
                              (new-results (nthcdr result-count-before all-results)))
+                        ;; Record this turn's verification status (a passing
+                        ;; shell-command) so the completion check can finish the
+                        ;; task when the tests are green. The stale value was
+                        ;; already cleared by the :edit transition at turn start;
+                        ;; the :verify transition below no longer clears it, so
+                        ;; this fresh value reaches maybe-auto-complete.
+                        (let ((verify-status (turn-verification-status new-results)))
+                          (when verify-status
+                            (claw-lisp.core.phases:set-last-verify-result
+                             session (eq verify-status :passed))))
                         (multiple-value-bind (stall-count nudge-kind)
                             (assess-loop-progress session tool-calls new-results)
                           (let* ((write-failed-p (eq nudge-kind :write-failed))
@@ -1233,10 +1263,13 @@ that starts with '[' and contains 'error' or 'timed out'."
                     (let ((transcript-path (session-transcript-path runtime session)))
                       (claw-lisp.core.phase-progression:apply-progression-policy
                        session tool-calls runtime transcript-path))
-                    ;; Fallback: if still in :edit after tools, transition to :verify
+                    ;; Fallback: if still in :edit after tools, transition to :verify.
+                    ;; Do NOT clear last-verify-result here: it was cleared on the
+                    ;; :edit transition at turn start and freshly set above from
+                    ;; this turn's shell-command outcome, so it must survive to the
+                    ;; completion check.
                     (when (eq :edit (claw-lisp.core.phases:get-current-phase session))
-                      (%transition-coding-phase session :verify "tool results ready"
-                                                :clear-last-verify-result t)))
+                      (%transition-coding-phase session :verify "tool results ready")))
                   (multiple-value-bind (completed-p completion-reason)
                       (claw-lisp.core.completion:maybe-auto-complete session response)
                     (declare (ignore completion-reason))

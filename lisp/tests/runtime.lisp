@@ -80,6 +80,35 @@
   (declare (ignore provider model))
   (max 1 (length messages)))
 
+;; verify-passing-provider: runs a shell-command that exits 0 (a passing
+;; verification) and never writes. Models the "tests already green / nothing to
+;; fix" case: the loop must COMPLETE on the passing verification rather than
+;; fail closed treating the no-write turns as stagnation.
+(defclass verify-passing-provider (claw-lisp.core.protocols:provider) ())
+
+(defmethod claw-lisp.core.protocols:send-turn
+    ((provider verify-passing-provider) conversation &key model tools system)
+  (declare (ignore provider conversation model tools system))
+  (claw-lisp.core.domain:make-transport-response
+   :ok-p t :status 200 :assistant-text "" :raw-response "{}"
+   :provider "verify-passing"
+   :tool-calls (list (list :id "v" :name "shell-command" :input (list :text "true")))))
+
+(defmethod claw-lisp.core.protocols:stream-turn
+    ((provider verify-passing-provider) conversation &key model tools on-event system)
+  (declare (ignore on-event))
+  (claw-lisp.core.protocols:send-turn provider conversation :model model :tools tools :system system))
+
+(defmethod claw-lisp.core.protocols:normalize-response
+    ((provider verify-passing-provider) response)
+  (declare (ignore provider))
+  response)
+
+(defmethod claw-lisp.core.protocols:count-tokens
+    ((provider verify-passing-provider) messages &key model)
+  (declare (ignore provider model))
+  (max 1 (length messages)))
+
 (defmethod claw-lisp.core.protocols:send-turn
     ((provider shell-pivot-provider) conversation &key model tools system)
   (declare (ignore conversation model system))
@@ -6037,6 +6066,32 @@
       (when (probe-file root)
         (uiop:delete-directory-tree root :validate t)))))
 
+(defun test-passing-verification-completes-task ()
+  "A passing verification (shell-command exits 0) must complete the task, even
+   with no file write. Reproduces the 'tests already green / nothing to fix'
+   case that previously fail-closed on stagnation because no write occurred."
+  (let ((runtime (make-runtime))
+        (provider (make-instance 'verify-passing-provider :name "verify-passing")))
+    (claw-lisp.core.runtime:register-provider runtime provider)
+    (register-tool runtime (make-shell-command-tool))
+    (let* ((session (start-session runtime
+                                   :provider-name "verify-passing"
+                                   :model "mock-model"
+                                   :session-id "verify-completes"))
+           (conversation (claw-lisp.core.domain:agent-session-conversation session))
+           (response
+             (handler-case
+                 (progn
+                   (append-message conversation
+                                   (make-message :role :user :content "make the tests pass"))
+                   (claw-lisp.core.runtime:execute-provider-turn-loop runtime session provider))
+               (error (c)
+                 (%assert nil "Passing verification should complete, not error: ~A" c)))))
+      (%assert response "Expected a response from the completed turn")
+      (%assert (eq :complete (claw-lisp.core.phases:get-current-phase session))
+               "Expected session to reach :complete after a passing verification, got ~A"
+               (claw-lisp.core.phases:get-current-phase session)))))
+
 (defun test-provider-tool-loop-budget-returns-gracefully ()
   "Reaching the provider tool-iteration budget is a normal stop, not an error.
    A provider that keeps making progress (a successful write every turn) never
@@ -6455,6 +6510,7 @@
   (test-stall-increments-on-no-write-turn-with-interleaved-shell)
   (test-stall-counter-unaffected-when-no-tool-calls)
   (test-provider-tool-loop-budget-returns-gracefully)
+  (test-passing-verification-completes-task)
   (test-failed-write-advances-stagnation-to-nudge-threshold)
   (test-successful-write-resets-stagnation)
   ;; Agent loop improvements: model-family dispatch and differential reflection
