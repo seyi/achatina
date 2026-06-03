@@ -81,6 +81,15 @@
 (defparameter +write-tool-names+ '("file-write" "file-replace")
   "Tool names that represent substantive file modifications and reset stagnation state.")
 
+(defparameter +failed-write-recovery-nudge-text+
+  (concatenate
+   'string
+   "file-replace failed because the old-text did not match the actual file contents. "
+   "You have already read the file earlier in this session — use those contents directly. "
+   "Your next action must be file-write with the path and the complete corrected file content. "
+   "Do not call file-read.")
+  "Nudge injected when a write tool fails, to block the post-failure reread loop.")
+
 (defun register-tool (runtime tool)
   "Register TOOL under its declared name and return RUNTIME."
   (setf (gethash (claw-lisp.core.protocols:tool-name tool)
@@ -983,6 +992,25 @@ that starts with '[' and contains 'error' or 'timed out'."
     (t
      (values (session-state-value session :read-only-tool-loop-repeat-count 0) nil))))
 
+(defun maybe-advance-stagnation-on-failed-write (session new-results)
+  "When any write tool result is an error, advance the stagnation counter to the
+   nudge threshold so read-only tools are suppressed on the next provider turn.
+   Returns T when a failed write is detected, NIL otherwise.
+
+   This prevents the post-failed-write reread loop: a model that tries file-replace,
+   gets a mismatch error, and then falls back to file-read already has the file
+   contents in context and must use file-write with the full corrected content."
+  (when (some (lambda (result)
+                (and (member (claw-lisp.core.domain:tool-result-tool-name result)
+                             +write-tool-names+ :test #'string=)
+                     (tool-result-error-p result)))
+              new-results)
+    (let ((current (session-state-value session :read-only-tool-loop-repeat-count 0)))
+      (when (< current +read-only-tool-loop-nudge-threshold+)
+        (set-session-state-value session :read-only-tool-loop-repeat-count
+                                 +read-only-tool-loop-nudge-threshold+)))
+    t))
+
 (defun ensure-turn-not-in-flight (session)
   "Signal an error when SESSION already has a turn executing."
   (when (session-state-value session :turn-in-flight-p)
@@ -1114,9 +1142,12 @@ that starts with '[' and contains 'error' or 'timed out'."
                                  error-result)))))
                         (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
                                (new-results (nthcdr result-count-before all-results))
+                               (write-failed-p (maybe-advance-stagnation-on-failed-write session new-results))
                                (reflection-text (make-differential-reflection-text new-results))
-                               (progression-nudge (when nudge-needed-p
-                                                    (read-only-loop-progression-nudge-text))))
+                               (progression-nudge (cond
+                                                    (write-failed-p +failed-write-recovery-nudge-text+)
+                                                    (nudge-needed-p (read-only-loop-progression-nudge-text))
+                                                    (t nil))))
                           (when new-results
                             (let ((result-msg (make-tool-result-message
                                                new-results
@@ -1130,7 +1161,8 @@ that starts with '[' and contains 'error' or 'timed out'."
                                (list :event "tool_results_sent"
                                      :session_id (claw-lisp.core.domain:agent-session-id session)
                                      :count (length new-results)
-                                     :progression_nudge_p (and nudge-needed-p t)))
+                                     :progression_nudge_p (and nudge-needed-p t)
+                                     :write_failed_p (and write-failed-p t)))
                               (when nudge-needed-p
                                 (maybe-append-transcript-event
                                  session

@@ -5781,6 +5781,39 @@
                        (claw-lisp.core.domain:message-content-text boundary-msg))
                "Boundary message should contain rendered IR content"))))
 
+(defun test-failed-write-advances-stagnation-to-nudge-threshold ()
+  "Verify that a failed write advances the stagnation counter to the nudge threshold."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "failed-write-advance"
+                  :provider "mock" :model "mock"
+                  :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
+    (let* ((failure (claw-lisp.core.domain:make-tool-result
+                     :call-id "r1" :tool-name "file-replace"
+                     :content "[error] Tool file-replace failed: Old text not found"))
+           (fired-p (claw-lisp.core.runtime:maybe-advance-stagnation-on-failed-write
+                     session (list failure))))
+      (%assert fired-p "Expected maybe-advance to return T on failed write")
+      (%assert (= claw-lisp.core.runtime::+read-only-tool-loop-nudge-threshold+
+                  (claw-lisp.core.runtime::session-state-value
+                   session :read-only-tool-loop-repeat-count 0))
+               "Expected stagnation count to equal nudge threshold after failed write"))))
+
+(defun test-successful-write-does-not-advance-stagnation ()
+  "Verify that a successful write result does not advance the stagnation counter."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "successful-write-no-advance"
+                  :provider "mock" :model "mock"
+                  :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
+    (let* ((success (claw-lisp.core.domain:make-tool-result
+                     :call-id "r1" :tool-name "file-write"
+                     :content "Wrote 42 bytes to f.py"))
+           (fired-p (claw-lisp.core.runtime:maybe-advance-stagnation-on-failed-write
+                     session (list success))))
+      (%assert (null fired-p) "Expected maybe-advance to return NIL on successful write")
+      (%assert (= 0 (claw-lisp.core.runtime::session-state-value
+                     session :read-only-tool-loop-repeat-count 0))
+               "Expected stagnation count to remain 0 after successful write"))))
+
 (defun test-stagnation-not-reset-by-observational-shell-command ()
   "Verify that an echo turn after nudge does not re-enable read-only tools."
   (let* ((root (merge-pathnames
@@ -6201,6 +6234,8 @@
   ;; Agent loop improvements: stagnation reset fix
   (test-stagnation-not-reset-by-observational-shell-command)
   (test-stagnation-resets-on-write-tool-call)
+  (test-failed-write-advances-stagnation-to-nudge-threshold)
+  (test-successful-write-does-not-advance-stagnation)
   ;; Agent loop improvements: model-family dispatch and differential reflection
   (test-model-family-dispatch)
   (test-build-system-prompt-selects-directive-for-kimi)
