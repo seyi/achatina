@@ -1513,7 +1513,8 @@
                 #:tool-description
                 #:tool-input-schema)
   (:export
-   #:build-system-prompt))
+   #:build-system-prompt
+   #:model-family))
 
 (defpackage #:claw-lisp.core.message-normalization
   (:use #:cl)
@@ -2118,6 +2119,8 @@
    #:maybe-update-session-memory
    #:compact-session-with-session-memory
    #:compact-session
+   ;; Agent loop improvements
+   #:make-differential-reflection-text
    ;; Phase 8 supervisor state helpers
    #:session-supervisor-state
    #:set-session-supervisor-state

@@ -878,16 +878,40 @@ that starts with '[' and contains 'error' or 'timed out'."
    "(2) use shell-command to run a focused verification step, or "
    "(3) explain concretely why you cannot proceed with either action."))
 
-(defun make-tool-result-message (tool-results &key progression-nudge)
+(defun make-differential-reflection-text (results)
+  "Return model-facing prose distinguishing failed tool calls from successes.
+   Returns NIL when all results succeeded."
+  (let ((failures (remove-if-not #'tool-result-error-p results))
+        (successes (remove-if #'tool-result-error-p results)))
+    (when failures
+      (with-output-to-string (out)
+        (format out "~D tool call(s) failed:~%" (length failures))
+        (dolist (f failures)
+          (let* ((raw (claw-lisp.core.domain:tool-result-content f))
+                 (msg (if (and (stringp raw)
+                               (> (length raw) 8)
+                               (string= "[error] " raw :end2 8))
+                          (subseq raw 8)
+                          raw)))
+            (format out "  - ~A: ~A~%"
+                    (claw-lisp.core.domain:tool-result-tool-name f)
+                    msg)))
+        (when successes
+          (format out "~D call(s) succeeded (~{~A~^, ~}). Do not re-call these — only fix the failure(s) above."
+                  (length successes)
+                  (mapcar #'claw-lisp.core.domain:tool-result-tool-name successes)))))))
+
+(defun make-tool-result-message (tool-results &key progression-nudge reflection-text)
   "Build a user message containing tool_result content blocks.
 
    TOOL-RESULTS is a list of tool-result structs produced by tool execution.
    Each result is converted to a `tool-result-block` so the Anthropic API
    can associate results with the tool_use blocks that requested them.
 
-   When PROGRESSION-NUDGE is a non-empty string, append it as a trailing
-   text block in the same user message. This mirrors the `src` pattern of
-   steering the next model turn via tool-result-adjacent guidance."
+   When REFLECTION-TEXT is a non-empty string, it is appended first as a
+   text block summarising which calls failed and which succeeded.
+   When PROGRESSION-NUDGE is a non-empty string, it is appended after to
+   steer the next model turn."
   (make-message
    :role :user
    :content
@@ -901,6 +925,9 @@ that starts with '[' and contains 'error' or 'timed out'."
                           c
                           "Tool execution failed with no output."))
            :is-error (tool-result-error-p result)))
+    (when (and reflection-text (plusp (length reflection-text)))
+      (list (claw-lisp.core.domain:make-text-block
+             :text reflection-text)))
     (when (and progression-nudge (plusp (length progression-nudge)))
       (list (claw-lisp.core.domain:make-text-block
              :text progression-nudge))))))
@@ -969,11 +996,12 @@ that starts with '[' and contains 'error' or 'timed out'."
    "Session is busy executing a turn. Reentrant turns on the same session are not allowed."
    (lambda ()
      (claw-lisp.core.phases:initialize-phase-state session)
-     (let ((conversation (claw-lisp.core.domain:agent-session-conversation session))
-           (model (claw-lisp.core.domain:agent-session-model session))
-           (system-prompt (claw-lisp.core.system-prompt:build-system-prompt
-                           :project-root (runtime-effective-project-root runtime)
-                           :tool-registry (runtime-tool-registry runtime))))
+     (let* ((conversation (claw-lisp.core.domain:agent-session-conversation session))
+            (model (claw-lisp.core.domain:agent-session-model session))
+            (system-prompt (claw-lisp.core.system-prompt:build-system-prompt
+                            :project-root (runtime-effective-project-root runtime)
+                            :tool-registry (runtime-tool-registry runtime)
+                            :model model)))
        (loop for iteration from 1 to +max-provider-tool-iterations+
              do
                 (let* ((supports-tools (model-supports-p (runtime-model-registry runtime)
@@ -1074,11 +1102,13 @@ that starts with '[' and contains 'error' or 'timed out'."
                                  error-result)))))
                         (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
                                (new-results (nthcdr result-count-before all-results))
+                               (reflection-text (make-differential-reflection-text new-results))
                                (progression-nudge (when nudge-needed-p
                                                     (read-only-loop-progression-nudge-text))))
                           (when new-results
                             (let ((result-msg (make-tool-result-message
                                                new-results
+                                               :reflection-text reflection-text
                                                :progression-nudge progression-nudge))
                                   (transcript-path (session-transcript-path runtime session)))
                               (append-message conversation result-msg)

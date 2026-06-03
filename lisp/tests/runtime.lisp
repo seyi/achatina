@@ -5728,6 +5728,66 @@
                        (claw-lisp.core.domain:message-content-text boundary-msg))
                "Boundary message should contain rendered IR content"))))
 
+(defun test-model-family-dispatch ()
+  (%assert (eq :moonshot (claw-lisp.core.system-prompt:model-family "moonshotai/kimi-k2.6"))
+           "Expected moonshotai/ -> :moonshot")
+  (%assert (eq :moonshot (claw-lisp.core.system-prompt:model-family "openrouter/moonshotai/kimi-k2.6"))
+           "Expected openrouter/moonshotai/ -> :moonshot")
+  (%assert (eq :qwen (claw-lisp.core.system-prompt:model-family "qwen/qwen3.7-max"))
+           "Expected qwen/ -> :qwen")
+  (%assert (eq :anthropic (claw-lisp.core.system-prompt:model-family "anthropic/claude-sonnet-4-6"))
+           "Expected anthropic/ -> :anthropic")
+  (%assert (eq :openai (claw-lisp.core.system-prompt:model-family "openai/gpt-4o"))
+           "Expected openai/ -> :openai")
+  (%assert (eq :default (claw-lisp.core.system-prompt:model-family nil))
+           "Expected nil -> :default")
+  (%assert (eq :default (claw-lisp.core.system-prompt:model-family "unknown/model"))
+           "Expected unknown provider -> :default"))
+
+(defun test-build-system-prompt-selects-directive-for-kimi ()
+  (let ((prompt (claw-lisp.core.system-prompt:build-system-prompt
+                 :model "moonshotai/kimi-k2.6")))
+    (%assert (search "TURN BUDGET" prompt)
+             "Expected directive prompt (TURN BUDGET) for kimi model")))
+
+(defun test-build-system-prompt-selects-directive-for-qwen ()
+  (let ((prompt (claw-lisp.core.system-prompt:build-system-prompt
+                 :model "qwen/qwen3.7-max")))
+    (%assert (search "TURN BUDGET" prompt)
+             "Expected directive prompt (TURN BUDGET) for qwen model")))
+
+(defun test-build-system-prompt-selects-base-for-claude ()
+  (let ((prompt (claw-lisp.core.system-prompt:build-system-prompt
+                 :model "anthropic/claude-sonnet-4-6")))
+    (%assert (search "Core Principles" prompt)
+             "Expected base prompt (Core Principles) for claude model")
+    (%assert (null (search "TURN BUDGET" prompt))
+             "Expected no TURN BUDGET directive in claude prompt")))
+
+(defun test-make-differential-reflection-text-nil-on-all-success ()
+  (let* ((result (claw-lisp.core.domain:make-tool-result
+                  :call-id "1" :tool-name "file-read" :content "file contents here"))
+         (reflection (claw-lisp.core.runtime:make-differential-reflection-text (list result))))
+    (%assert (null reflection)
+             "Expected nil reflection when all tool results succeed")))
+
+(defun test-make-differential-reflection-text-failure-message ()
+  (let* ((success (claw-lisp.core.domain:make-tool-result
+                   :call-id "1" :tool-name "file-read" :content "file contents here"))
+         (failure (claw-lisp.core.domain:make-tool-result
+                   :call-id "2" :tool-name "file-replace"
+                   :content "[error] Tool file-replace failed: substring not found"))
+         (reflection (claw-lisp.core.runtime:make-differential-reflection-text
+                      (list success failure))))
+    (%assert (stringp reflection)
+             "Expected string reflection when any result fails")
+    (%assert (search "file-replace" reflection)
+             "Expected failing tool name in reflection text")
+    (%assert (search "file-read" reflection)
+             "Expected successful tool name in reflection text")
+    (%assert (search "Do not re-call" reflection)
+             "Expected 'Do not re-call' directive in reflection text")))
+
 (defun run-tests ()
   ;; Phase 2c: Conditions and Retry
   (test-condition-hierarchy)
@@ -6025,5 +6085,12 @@
   (run-cas-integrity-tests)
   ;; Phase 10: CAS Artifact Facade
   (run-artifacts-tests)
+  ;; Agent loop improvements: model-family dispatch and differential reflection
+  (test-model-family-dispatch)
+  (test-build-system-prompt-selects-directive-for-kimi)
+  (test-build-system-prompt-selects-directive-for-qwen)
+  (test-build-system-prompt-selects-base-for-claude)
+  (test-make-differential-reflection-text-nil-on-all-success)
+  (test-make-differential-reflection-text-failure-message)
   (format t "claw-lisp tests passed.~%")
   0)

@@ -30,6 +30,41 @@
 - If you encounter an error you can't resolve, explain what you tried and ask for guidance."
   "The base system prompt that establishes Claw's identity and behavior.")
 
+(defparameter +base-system-prompt-directive+
+  "You are Claw, a coding assistant.
+
+TURN BUDGET: Complete the task in at most 3 tool turns.
+- Turn 1: Read the file(s) named in the task.
+- Turn 2: Write the fix. Use file-write with the full corrected file content when uncertain about the exact substring to replace.
+- Turn 3: Run the verification command the user specified.
+
+STRICT RULES:
+1. Do not read a file more than once.
+2. After a failed file-replace (substring not found), use file-write with the full corrected content — do not re-read.
+3. Use the exact verification command the user specified, not an alternative.
+4. After writing and running verification, stop.
+5. Do not narrate your plan. Call tools."
+  "Directive system prompt for models that benefit from explicit step-by-step turn budgeting.")
+
+(defun model-family (model-string)
+  "Return a keyword identifying the provider family for MODEL-STRING.
+   MODEL-STRING is typically 'provider/model-name' from the session."
+  (cond
+    ((null model-string) :default)
+    ((or (search "anthropic" model-string :test #'char-equal)
+         (search "claude" model-string :test #'char-equal))
+     :anthropic)
+    ((or (search "openai" model-string :test #'char-equal)
+         (search "gpt" model-string :test #'char-equal)
+         (search "azure" model-string :test #'char-equal))
+     :openai)
+    ((or (search "moonshotai" model-string :test #'char-equal)
+         (search "kimi" model-string :test #'char-equal))
+     :moonshot)
+    ((search "qwen" model-string :test #'char-equal)
+     :qwen)
+    (t :default)))
+
 (defun safe-truncate-string (string max-chars &optional (suffix ""))
   "Truncate STRING to at most MAX-CHARS characters, appending SUFFIX if truncated.
    MAX-CHARS refers to character count (not byte count), so this is always safe
@@ -101,15 +136,19 @@
     (format nil "## Current Time~%~%~4,'0D-~2,'0D-~2,'0D ~2,'0D:~2,'0D:~2,'0D UTC~%"
             year month day hour min sec)))
 
-(defun build-system-prompt (&key project-root tool-registry)
+(defun build-system-prompt (&key project-root tool-registry model)
   "Build the complete system prompt for a new conversation.
-   
+
    PROJECT-ROOT is the project directory for CLAUDE.md discovery and git context.
    TOOL-REGISTRY is the hash table of registered tools.
-   
+   MODEL is the model identifier string used to select the appropriate base prompt.
+
    Returns the assembled system prompt string."
-  (let ((parts (list +base-system-prompt+))
-        (effective-root (or project-root (uiop:getcwd))))
+  (let* ((base-prompt (if (member (model-family model) '(:moonshot :qwen))
+                          +base-system-prompt-directive+
+                          +base-system-prompt+))
+         (effective-root (or project-root (uiop:getcwd)))
+         (parts (list base-prompt)))
     ;; CLAUDE.md content
     (let ((claude-md (claw-lisp.core.claude-md:load-claude-md-files
                       :project-root effective-root)))
@@ -125,7 +164,6 @@
     (when tool-registry
       (let ((tool-descs (format-tool-registry tool-registry)))
         (when tool-descs
-          (push tool-descs parts)))
-      )
+          (push tool-descs parts))))
     ;; Assemble with separators
     (format nil "~{~A~^~%~%---~%~%~}" (nreverse parts))))
