@@ -246,6 +246,47 @@
                "Expected serialized messages array in OpenRouter JSON, got ~A"
                (json-encode-string body)))))
 
+(defun test-openrouter-chat-json-threads-tool-results-as-tool-role ()
+  "Regression for the OpenRouter context-loss bug: tool results MUST serialize as
+   role:\"tool\" messages with a matching tool_call_id, and assistant tool calls
+   as well-formed tool_calls. Previously the chat path dropped tool-result blocks
+   entirely, so OpenRouter-hosted models received no record of what they read or
+   ran and looped re-reading the same files forever, never progressing to a write."
+  (let ((conversation (make-conversation :id "chat-json-tool-results")))
+    (append-message conversation (make-message :role :user :content "fix it"))
+    (append-message conversation
+                    (make-message :role :assistant
+                                  :content (list (make-tool-use-block
+                                                  :id "call_1" :name "file-read"
+                                                  :input '(:path "m.py")))))
+    (append-message conversation
+                    (make-message :role :user
+                                  :content (list (claw-lisp.core.domain:make-tool-result-block
+                                                  :tool-use-id "call_1"
+                                                  :content "file body here"
+                                                  :is-error nil))))
+    (let* ((body (conversation->chat-json conversation "moonshotai/kimi-k2.6"))
+           (messages (getf body :messages)))
+      (%assert (= 3 (length messages))
+               "Expected 3 chat messages (user, assistant, tool), got ~A" (length messages))
+      (let ((assistant (second messages))
+            (tool-msg (third messages)))
+        (%assert (string= "assistant" (getf assistant :role))
+                 "Expected assistant role on second message, got ~A" (getf assistant :role))
+        (%assert (getf assistant :tool_calls)
+                 "Expected assistant message to carry tool_calls")
+        (%assert (string= "tool" (getf tool-msg :role))
+                 "Expected role:tool for the tool result, got ~A" (getf tool-msg :role))
+        (%assert (string= "call_1" (getf tool-msg :tool_call_id))
+                 "Expected matching tool_call_id, got ~A" (getf tool-msg :tool_call_id))
+        (%assert (string= "file body here" (getf tool-msg :content))
+                 "Expected tool result content to be threaded, got ~A" (getf tool-msg :content)))
+      (let ((json (json-encode-string body)))
+        (%assert (search "\"role\":\"tool\"" json)
+                 "Expected role:tool in serialized JSON, got ~A" json)
+        (%assert (search "\"tool_call_id\":\"call_1\"" json)
+                 "Expected tool_call_id in serialized JSON, got ~A" json)))))
+
 (defun test-openrouter-chat-json-tools-serialize-as-array-of-objects ()
   (let* ((conversation (make-conversation :id "test-openrouter-chat-json-tools"))
          (tools (list (list :name "file-read"
@@ -6224,6 +6265,7 @@
   (test-content-block-roundtrip)
   (test-anthropic-json-format)
   (test-openrouter-chat-json-single-message-uses-array)
+  (test-openrouter-chat-json-threads-tool-results-as-tool-role)
   (test-openrouter-chat-json-tools-serialize-as-array-of-objects)
   (test-openrouter-env-alias-loads-credentials)
   (test-openrouter-response-extraction)

@@ -272,19 +272,55 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
         (list :role (role->anthropic-role (message-role message))
               :content (content-blocks->anthropic-array content)))))
 
-(defun message->chat-completion-block (message)
-  "Convert a MESSAGE to an OpenAI-style chat completion block."
-  (let ((content (message-content message)))
+(defun message->chat-completion-blocks (message)
+  "Convert a MESSAGE into one or more OpenAI-style chat messages.
+
+   The OpenAI/OpenRouter chat format requires each assistant tool_call to be
+   answered by a separate message with role \"tool\" and a matching
+   tool_call_id. Our internal representation stores tool results as
+   tool-result-blocks inside a single user message, so that message must be
+   EXPANDED into one role:\"tool\" message per result.
+
+   Previously the chat path had no tool-result handling at all: tool-result
+   blocks were silently dropped, so OpenRouter-hosted models received no record
+   of what they had read or run and behaved as if every turn started cold
+   (re-reading the same files, never progressing to an edit). Assistant
+   tool_calls were also attached via an improper cons-push that did not encode
+   as a well-formed object. Both are fixed here.
+
+   Returns a LIST of message plists (a single internal message may expand to
+   several chat messages)."
+  (let ((content (message-content message))
+        (role (role->chat-role (message-role message))))
     (if (stringp content)
-        (list :role (role->chat-role (message-role message))
-              :content content)
-        (let* ((text (content-blocks-chat-text content))
-               (tool-calls (content-blocks-chat-tool-calls content)))
-          (let ((block (list :role (role->chat-role (message-role message))
-                             :content (or text ""))))
-            (when tool-calls
-              (push (cons :tool_calls tool-calls) block))
-            block)))))
+        (list (list :role role :content content))
+        (let ((tool-results (remove-if-not (lambda (b) (typep b 'tool-result-block))
+                                           content))
+              (tool-calls (content-blocks-chat-tool-calls content))
+              (text (content-blocks-chat-text content)))
+          (cond
+            ;; Tool-result message → one role:"tool" message per result, then a
+            ;; trailing user message for any text blocks (reflection / nudge).
+            (tool-results
+             (append
+              (mapcar (lambda (b)
+                        (list :role "tool"
+                              :tool_call_id (tool-result-block-tool-use-id b)
+                              :content (let ((c (tool-result-block-content b)))
+                                         (if (and (stringp c) (plusp (length c)))
+                                             c
+                                             "(tool produced no output)"))))
+                      tool-results)
+              (when (plusp (length text))
+                (list (list :role "user" :content text)))))
+            ;; Assistant tool-call message (+ optional accompanying text).
+            (tool-calls
+             (list (list :role role
+                         :content (or text "")
+                         :tool_calls tool-calls)))
+            ;; Plain text content.
+            (t
+             (list (list :role role :content (or text "")))))))))
 
 ;; --- Conversation to JSON ---
 
@@ -322,7 +358,7 @@ RATE-LIMIT-STATE (optional) is updated with parsed rate-limit headers."
    Tools are converted to OpenAI function-calling format."
   (let ((messages
           (loop for msg in (conversation-messages conversation)
-                collect (message->chat-completion-block msg))))
+                nconc (message->chat-completion-blocks msg))))
     (let ((body (list :model model :messages messages)))
       (when tools
         (setf (getf body :tools)
