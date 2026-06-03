@@ -8,6 +8,16 @@
                  :name "grep"
                  :description "Search for a pattern in files within a directory."))
 
+(defparameter +grep-capability+
+  '(:class :read :valid-phases (:inspect) :mutates-fs nil)
+  "Loop-control capability for grep. Read-only discovery action.")
+
+(defmethod tool-capability ((tool grep-tool))
+  (declare (ignore tool))
+  +grep-capability+)
+
+(register-tool-capability "grep" +grep-capability+)
+
 (defmethod tool-input-schema ((tool grep-tool))
   (declare (ignore tool))
   (list :type "object"

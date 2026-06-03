@@ -8,6 +8,18 @@
                  :name "shell-command"
                  :description "Execute an explicit local shell command and return its output."))
 
+(defparameter +shell-command-capability+
+  '(:class :exec :valid-phases (:edit :verify) :mutates-fs nil)
+  "Loop-control capability for shell-command. Exec action — neither read-only nor
+   a mutation. An observational command (e.g. 'cat file') must not count as progress
+   or as inspection, so it is classified :exec, not :read or :write.")
+
+(defmethod tool-capability ((tool shell-command-tool))
+  (declare (ignore tool))
+  +shell-command-capability+)
+
+(register-tool-capability "shell-command" +shell-command-capability+)
+
 (defmethod tool-input-schema ((tool shell-command-tool))
   (declare (ignore tool))
   (list :type "object"

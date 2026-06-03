@@ -75,11 +75,11 @@
 (defparameter +read-only-tool-loop-nudge-threshold+ 2
   "Consecutive read-only tool-call turn count that triggers a progression nudge.")
 
-(defparameter +read-only-tool-names+ '("file-read" "glob" "grep")
-  "Tool names treated as read-only for stagnant loop detection.")
-
-(defparameter +write-tool-names+ '("file-write" "file-replace")
-  "Tool names that represent substantive file modifications and reset stagnation state.")
+;; Tool classification (read-only vs mutation) is resolved through the single
+;; capability source of truth in claw-lisp.core.tool-capability. The previously
+;; hardcoded +read-only-tool-names+ / +write-tool-names+ lists were removed so
+;; the stagnation guard, the tool-envelope predicates, and phase-progression can
+;; never drift apart. See notes/agent-loop-design.md (Step A / FND-004).
 
 (defparameter +failed-write-recovery-nudge-text+
   (concatenate
@@ -91,10 +91,13 @@
   "Nudge injected when a write tool fails, to block the post-failure reread loop.")
 
 (defun register-tool (runtime tool)
-  "Register TOOL under its declared name and return RUNTIME."
-  (setf (gethash (claw-lisp.core.protocols:tool-name tool)
-                 (runtime-tool-registry runtime))
-        tool)
+  "Register TOOL under its declared name and return RUNTIME.
+   Also propagates the tool's declared capability into the capability registry,
+   so the name-only classifiers stay consistent with the tool object even for
+   tools registered at runtime (e.g. plugins) that were not seeded at load."
+  (let ((name (claw-lisp.core.protocols:tool-name tool)))
+    (setf (gethash name (runtime-tool-registry runtime)) tool)
+    (register-tool-capability name (tool-capability tool)))
   runtime)
 
 (defun session-transcript-path (runtime session)
@@ -783,6 +786,11 @@ Set ALLOW-INCOMPATIBLE-MODEL-P to bypass this validation explicitly."
          collect key)
    #'string<))
 
+(defun read-only-tool-names (runtime)
+  "Return the names of RUNTIME's registered tools classified read-only by the
+   capability source of truth. Used to suppress discovery tools after a stall."
+  (remove-if-not #'tool-name-read-only-p (list-tool-names runtime)))
+
 (defun next-tool-call-id (conversation tool-name)
   "Return the next deterministic tool call ID for TOOL-NAME in CONVERSATION.
 
@@ -952,12 +960,14 @@ that starts with '[' and contains 'error' or 'timed out'."
            out)))
 
 (defun read-only-tool-call-p (tool-call)
-  "Return true when TOOL-CALL is a read-only filesystem/query action."
-  (member (getf tool-call :name) +read-only-tool-names+ :test #'string=))
+  "Return true when TOOL-CALL is a read-only filesystem/query action.
+   Classification flows through the capability source of truth."
+  (tool-name-read-only-p (getf tool-call :name)))
 
 (defun write-tool-call-p (tool-call)
-  "Return true when TOOL-CALL is a file-modification action."
-  (member (getf tool-call :name) +write-tool-names+ :test #'string=))
+  "Return true when TOOL-CALL is a file-modification action.
+   Classification flows through the capability source of truth."
+  (tool-name-mutation-p (getf tool-call :name)))
 
 (defun check-for-stagnant-read-only-tool-loop (session tool-calls)
   "Track consecutive read-only tool-call turns and fail closed on stagnation.
@@ -1001,8 +1011,8 @@ that starts with '[' and contains 'error' or 'timed out'."
    gets a mismatch error, and then falls back to file-read already has the file
    contents in context and must use file-write with the full corrected content."
   (when (some (lambda (result)
-                (and (member (claw-lisp.core.domain:tool-result-tool-name result)
-                             +write-tool-names+ :test #'string=)
+                (and (tool-name-mutation-p
+                      (claw-lisp.core.domain:tool-result-tool-name result))
                      (tool-result-error-p result)))
               new-results)
     (let ((current (session-state-value session :read-only-tool-loop-repeat-count 0)))
@@ -1051,7 +1061,7 @@ that starts with '[' and contains 'error' or 'timed out'."
                                 (provider-tool-descriptors
                                  runtime
                                  :exclude-names (when (>= stagnant-count +read-only-tool-loop-nudge-threshold+)
-                                                  +read-only-tool-names+))))
+                                                  (read-only-tool-names runtime)))))
                        (_ (maybe-idle-gap-microcompact runtime session model
                                                        :system-prompt system-prompt
                                                        :tool-definitions tools))

@@ -115,14 +115,12 @@
 (defun envelope-is-read-only-p (envelope)
   "Return T if ENVELOPE's tool is a read-only operation.
    Used by phase logic to distinguish inspection from mutation.
-   Tools not in either list return NIL from both predicates (unknown category)."
-  (let ((name (tool-envelope-tool-name envelope)))
-    (member name '("file-read" "glob" "grep")
-            :test #'string-equal)))
+   Classification is resolved through the single capability source of truth
+   (claw-lisp.core.tool-capability); tools of class :exec/:meta or unknown
+   tools return NIL from both this and ENVELOPE-IS-MUTATION-P."
+  (tool-name-read-only-p (tool-envelope-tool-name envelope)))
 
 (defun envelope-is-mutation-p (envelope)
   "Return T if ENVELOPE's tool is a write/mutation operation.
-   Tools not in either list return NIL from both predicates (unknown category)."
-  (let ((name (tool-envelope-tool-name envelope)))
-    (member name '("file-write" "file-replace")
-            :test #'string-equal)))
+   Resolved through claw-lisp.core.tool-capability; see ENVELOPE-IS-READ-ONLY-P."
+  (tool-name-mutation-p (tool-envelope-tool-name envelope)))

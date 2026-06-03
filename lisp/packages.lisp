@@ -1831,8 +1831,30 @@
    #:check-completion-triggers
    #:maybe-auto-complete))
 
+(defpackage #:claw-lisp.core.tool-capability
+  (:use #:cl)
+  (:import-from #:claw-lisp.core.protocols
+                #:tool
+                #:tool-name)
+  (:export
+   #:tool-capability
+   #:register-tool-capability
+   #:tool-name-capability
+   #:*default-tool-capability*
+   #:capability-class
+   #:capability-read-only-p
+   #:capability-mutation-p
+   #:capability-valid-phases
+   #:capability-mutates-fs-p
+   #:tool-name-read-only-p
+   #:tool-name-mutation-p
+   #:tool-name-valid-for-phase-p))
+
 (defpackage #:claw-lisp.core.tool-envelope
   (:use #:cl)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-name-read-only-p
+                #:tool-name-mutation-p)
   (:export
    ;; Struct and constructor
    #:tool-envelope
@@ -2014,6 +2036,11 @@
                 #:model-max-output-tokens)
   (:import-from #:claw-lisp.core.system-prompt
                 #:build-system-prompt)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability
+                #:tool-name-read-only-p
+                #:tool-name-mutation-p)
   (:import-from #:claw-lisp.core.conditions
                 #:context-exceeded-error)
   (:import-from #:claw-lisp.storage.transcripts
@@ -2159,6 +2186,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:file-read-tool
    #:make-file-read-tool))
@@ -2173,6 +2203,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:file-write-tool
    #:make-file-write-tool))
@@ -2187,6 +2220,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:file-replace-tool
    #:make-file-replace-tool))
@@ -2201,6 +2237,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:glob-tool
    #:make-glob-tool))
@@ -2215,6 +2254,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:grep-tool
    #:make-grep-tool))
@@ -2229,6 +2271,9 @@
                 #:tool
                 #:tool-input-schema
                 #:validate-tool-input)
+  (:import-from #:claw-lisp.core.tool-capability
+                #:tool-capability
+                #:register-tool-capability)
   (:export
    #:shell-command-tool
    #:make-shell-command-tool))

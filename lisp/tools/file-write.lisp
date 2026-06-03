@@ -8,6 +8,16 @@
                  :name "file-write"
                  :description "Write provided text content to a filesystem path."))
 
+(defparameter +file-write-capability+
+  '(:class :write :valid-phases (:edit) :mutates-fs t)
+  "Loop-control capability for file-write. File-mutation action; counts as progress.")
+
+(defmethod tool-capability ((tool file-write-tool))
+  (declare (ignore tool))
+  +file-write-capability+)
+
+(register-tool-capability "file-write" +file-write-capability+)
+
 (defmethod tool-input-schema ((tool file-write-tool))
   (declare (ignore tool))
   (list :type "object"

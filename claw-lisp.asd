@@ -12,6 +12,7 @@
    (:file "lisp/core/token-estimation")
    (:file "lisp/core/context-monitor")
    (:file "lisp/core/protocols")
+   (:file "lisp/core/tool-capability")
    (:file "lisp/providers/http-json")
    (:file "lisp/storage/transcripts")
    (:file "lisp/storage/tool-results")

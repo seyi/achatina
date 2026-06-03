@@ -8,6 +8,16 @@
                  :name "file-replace"
                  :description "Replace exact text occurrences in a file."))
 
+(defparameter +file-replace-capability+
+  '(:class :write :valid-phases (:edit) :mutates-fs t)
+  "Loop-control capability for file-replace. File-mutation action; counts as progress.")
+
+(defmethod tool-capability ((tool file-replace-tool))
+  (declare (ignore tool))
+  +file-replace-capability+)
+
+(register-tool-capability "file-replace" +file-replace-capability+)
+
 (defmethod tool-input-schema ((tool file-replace-tool))
   (declare (ignore tool))
   (list :type "object"

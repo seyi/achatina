@@ -8,6 +8,16 @@
                  :name "file-read"
                  :description "Read a text file from a provided filesystem path."))
 
+(defparameter +file-read-capability+
+  '(:class :read :valid-phases (:inspect :verify) :mutates-fs nil)
+  "Loop-control capability for file-read. Read-only inspection action.")
+
+(defmethod tool-capability ((tool file-read-tool))
+  (declare (ignore tool))
+  +file-read-capability+)
+
+(register-tool-capability "file-read" +file-read-capability+)
+
 (defmethod tool-input-schema ((tool file-read-tool))
   (declare (ignore tool))
   (list :type "object"

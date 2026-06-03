@@ -5781,6 +5781,61 @@
                        (claw-lisp.core.domain:message-content-text boundary-msg))
                "Boundary message should contain rendered IR content"))))
 
+(defun test-tool-classification-agreement-across-subsystems ()
+  "Pin the Step A invariant: the runtime stagnation predicates, the tool-envelope
+   predicates, and the capability source of truth all agree for every built-in tool.
+   This is the regression guard against the divergence the rebuild eliminated."
+  (dolist (spec '(("file-read"     t   nil)
+                  ("grep"          t   nil)
+                  ("glob"          t   nil)
+                  ("file-write"    nil t)
+                  ("file-replace"  nil t)
+                  ("shell-command" nil nil)
+                  ("echo"          nil nil)))
+    (destructuring-bind (name expect-read expect-write) spec
+      (let* ((tool-call (list :name name :input nil))
+             ;; Path 1: runtime stagnation predicates (name plist)
+             (rt-read  (claw-lisp.core.runtime::read-only-tool-call-p tool-call))
+             (rt-write (claw-lisp.core.runtime::write-tool-call-p tool-call))
+             ;; Path 2: tool-envelope predicates (probe envelope by name)
+             (probe (claw-lisp.core.tool-envelope:wrap-tool-success name ""))
+             (env-read  (claw-lisp.core.tool-envelope:envelope-is-read-only-p probe))
+             (env-write (claw-lisp.core.tool-envelope:envelope-is-mutation-p probe))
+             ;; Path 3: capability source of truth (name)
+             (cap-read  (claw-lisp.core.tool-capability:tool-name-read-only-p name))
+             (cap-write (claw-lisp.core.tool-capability:tool-name-mutation-p name)))
+        ;; Expected classification
+        (%assert (eq (and rt-read t) expect-read)
+                 "~A: read-only classification ~A, expected ~A" name rt-read expect-read)
+        (%assert (eq (and rt-write t) expect-write)
+                 "~A: mutation classification ~A, expected ~A" name rt-write expect-write)
+        ;; All three paths must agree (the divergence guard)
+        (%assert (eq (and rt-read t) (and env-read t))
+                 "~A: runtime/envelope disagree on read-only (~A vs ~A)" name rt-read env-read)
+        (%assert (eq (and rt-read t) (and cap-read t))
+                 "~A: runtime/capability disagree on read-only (~A vs ~A)" name rt-read cap-read)
+        (%assert (eq (and rt-write t) (and env-write t))
+                 "~A: runtime/envelope disagree on mutation (~A vs ~A)" name rt-write env-write)
+        (%assert (eq (and rt-write t) (and cap-write t))
+                 "~A: runtime/capability disagree on mutation (~A vs ~A)" name rt-write cap-write)))))
+
+(defun test-tool-capability-method-matches-registry ()
+  "The object-dispatched tool-capability method and the name-keyed registry must
+   return the same plist for each built-in tool (they share one constant)."
+  (dolist (spec (list (cons (make-file-read-tool)     "file-read")
+                      (cons (make-file-write-tool)    "file-write")
+                      (cons (make-file-replace-tool)  "file-replace")
+                      (cons (make-shell-command-tool) "shell-command")
+                      (cons (make-grep-tool)          "grep")
+                      (cons (make-glob-tool)          "glob")))
+    (let* ((tool (car spec))
+           (name (cdr spec))
+           (from-object (claw-lisp.core.tool-capability:tool-capability tool))
+           (from-registry (claw-lisp.core.tool-capability:tool-name-capability name)))
+      (%assert (equal from-object from-registry)
+               "~A: object capability ~S /= registry capability ~S"
+               name from-object from-registry))))
+
 (defun test-failed-write-advances-stagnation-to-nudge-threshold ()
   "Verify that a failed write advances the stagnation counter to the nudge threshold."
   (let ((session (claw-lisp.core.domain:make-agent-session
@@ -6231,6 +6286,10 @@
   (run-cas-integrity-tests)
   ;; Phase 10: CAS Artifact Facade
   (run-artifacts-tests)
+  ;; Agent loop rebuild Step A: capability source of truth
+  (test-tool-classification-agreement-across-subsystems)
+  (test-tool-capability-method-matches-registry)
+  (run-tool-envelope-tests)
   ;; Agent loop improvements: stagnation reset fix
   (test-stagnation-not-reset-by-observational-shell-command)
   (test-stagnation-resets-on-write-tool-call)
