@@ -2148,7 +2148,7 @@
    #:compact-session
    ;; Agent loop improvements
    #:make-differential-reflection-text
-   #:maybe-advance-stagnation-on-failed-write
+   #:assess-loop-progress
    ;; Phase 8 supervisor state helpers
    #:session-supervisor-state
    #:set-session-supervisor-state

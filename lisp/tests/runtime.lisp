@@ -38,7 +38,9 @@
   (declare (ignore provider conversation model tools on-event system))
   (error "intentional provider failure"))
 
-;; shell-pivot-provider: 2 file-read turns, 1 echo turn, then records tools offered
+;; shell-pivot-provider: reads twice (stall→nudge→read suppression), then once reads
+;; are suppressed it writes successfully (progress), then stops. Records the tool set
+;; offered on the post-suppression turn so the test can assert reads were excluded.
 (defclass shell-pivot-provider (claw-lisp.core.protocols:provider)
   ((call-count :initform 0 :accessor shell-pivot-provider-call-count)
    (tools-offered-on-final-turn :initform nil
@@ -60,18 +62,20 @@
                     :name "file-read"
                     :input (list :path (shell-pivot-provider-path provider))))))
       ((= count 3)
+       ;; Post-suppression turn: capture the offered tools, then write the fix.
+       (setf (shell-pivot-provider-tools-offered-on-final-turn provider) tools)
        (claw-lisp.core.domain:make-transport-response
         :ok-p t :status 200 :assistant-text "" :raw-response "{}"
         :provider "shell-pivot"
         :tool-calls
-        (list (list :id "toolu_echo_01"
-                    :name "echo"
-                    :input (list :text "observational echo — not a write")))))
+        (list (list :id "toolu_write_01"
+                    :name "file-write"
+                    :input (list :path (shell-pivot-provider-path provider)
+                                 :text "fixed content")))))
       (t
-       (setf (shell-pivot-provider-tools-offered-on-final-turn provider) tools)
        (claw-lisp.core.domain:make-transport-response
         :ok-p t :status 200
-        :assistant-text "Stopping — no read tools available."
+        :assistant-text "Done — wrote the fix."
         :raw-response "{}"
         :provider "shell-pivot"
         :tool-calls nil)))))
@@ -5837,42 +5841,87 @@
                name from-object from-registry))))
 
 (defun test-failed-write-advances-stagnation-to-nudge-threshold ()
-  "Verify that a failed write advances the stagnation counter to the nudge threshold."
+  "assess-loop-progress: a failed write advances the stall counter to the nudge
+   threshold and reports the :write-failed nudge kind."
   (let ((session (claw-lisp.core.domain:make-agent-session
                   :id "failed-write-advance"
                   :provider "mock" :model "mock"
                   :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
-    (let* ((failure (claw-lisp.core.domain:make-tool-result
-                     :call-id "r1" :tool-name "file-replace"
-                     :content "[error] Tool file-replace failed: Old text not found"))
-           (fired-p (claw-lisp.core.runtime:maybe-advance-stagnation-on-failed-write
-                     session (list failure))))
-      (%assert fired-p "Expected maybe-advance to return T on failed write")
-      (%assert (= claw-lisp.core.runtime::+read-only-tool-loop-nudge-threshold+
-                  (claw-lisp.core.runtime::session-state-value
-                   session :read-only-tool-loop-repeat-count 0))
-               "Expected stagnation count to equal nudge threshold after failed write"))))
+    (let ((failure (claw-lisp.core.domain:make-tool-result
+                    :call-id "r1" :tool-name "file-replace"
+                    :content "[error] Tool file-replace failed: Old text not found"))
+          (tool-calls (list (list :id "r1" :name "file-replace" :input nil))))
+      (multiple-value-bind (count nudge-kind)
+          (claw-lisp.core.runtime:assess-loop-progress session tool-calls (list failure))
+        (%assert (eq :write-failed nudge-kind)
+                 "Expected :write-failed nudge kind, got ~A" nudge-kind)
+        (%assert (= claw-lisp.core.runtime::+read-only-tool-loop-nudge-threshold+ count)
+                 "Expected stall count to equal nudge threshold after failed write, got ~A" count)
+        (%assert (= count (claw-lisp.core.runtime::session-state-value
+                           session :read-only-tool-loop-repeat-count 0))
+                 "Expected session state to match returned count")))))
 
-(defun test-successful-write-does-not-advance-stagnation ()
-  "Verify that a successful write result does not advance the stagnation counter."
+(defun test-successful-write-resets-stagnation ()
+  "assess-loop-progress: a successful write resets the stall counter to 0 and
+   reports no nudge — the model has earned the right to inspect again."
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "successful-write-no-advance"
+                  :id "successful-write-reset"
                   :provider "mock" :model "mock"
                   :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
-    (let* ((success (claw-lisp.core.domain:make-tool-result
-                     :call-id "r1" :tool-name "file-write"
-                     :content "Wrote 42 bytes to f.py"))
-           (fired-p (claw-lisp.core.runtime:maybe-advance-stagnation-on-failed-write
-                     session (list success))))
-      (%assert (null fired-p) "Expected maybe-advance to return NIL on successful write")
-      (%assert (= 0 (claw-lisp.core.runtime::session-state-value
-                     session :read-only-tool-loop-repeat-count 0))
-               "Expected stagnation count to remain 0 after successful write"))))
+    (claw-lisp.core.runtime::set-session-state-value
+     session :read-only-tool-loop-repeat-count 1)
+    (let ((success (claw-lisp.core.domain:make-tool-result
+                    :call-id "r1" :tool-name "file-write"
+                    :content "Wrote 42 bytes to f.py"))
+          (tool-calls (list (list :id "r1" :name "file-write" :input nil))))
+      (multiple-value-bind (count nudge-kind)
+          (claw-lisp.core.runtime:assess-loop-progress session tool-calls (list success))
+        (%assert (null nudge-kind) "Expected no nudge on successful write, got ~A" nudge-kind)
+        (%assert (= 0 count) "Expected count reset to 0 on successful write, got ~A" count)
+        (%assert (= 0 (claw-lisp.core.runtime::session-state-value
+                       session :read-only-tool-loop-repeat-count 0))
+                 "Expected session state reset to 0 after successful write")))))
 
-(defun test-stagnation-not-reset-by-observational-shell-command ()
-  "Verify that an echo turn after nudge does not re-enable read-only tools."
+(defun test-stall-increments-on-no-write-turn-with-interleaved-shell ()
+  "Step D core fix (regression guard for the Qwen/Kimi live failure): a turn that
+   interleaves reads with an observational shell command (e.g. running the test
+   suite) but performs NO write is a stall and MUST increment the counter.
+   Previously such mixed [read, read, shell] turns dodged stall detection because
+   they were not *purely* read-only, so the nudge and read-tool suppression never
+   engaged and the model looped read->test->read->test until it timed out."
+  (let ((session (claw-lisp.core.domain:make-agent-session
+                  :id "stall-interleaved-shell"
+                  :provider "mock" :model "mock"
+                  :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
+    (let ((tool-calls (list (list :id "a" :name "file-read" :input '(:path "m.py"))
+                            (list :id "b" :name "file-read" :input '(:path "t.py"))
+                            (list :id "c" :name "shell-command"
+                                  :input '(:text "python3 -m unittest"))))
+          (results (list (claw-lisp.core.domain:make-tool-result
+                          :call-id "a" :tool-name "file-read" :content "code")
+                         (claw-lisp.core.domain:make-tool-result
+                          :call-id "b" :tool-name "file-read" :content "tests")
+                         (claw-lisp.core.domain:make-tool-result
+                          :call-id "c" :tool-name "shell-command" :content "ran tests"))))
+      (multiple-value-bind (count1 kind1)
+          (claw-lisp.core.runtime:assess-loop-progress session tool-calls results)
+        (%assert (= 1 count1)
+                 "Expected interleaved-shell no-write turn to increment to 1, got ~A" count1)
+        (%assert (null kind1) "Expected no nudge at count 1, got ~A" kind1))
+      (multiple-value-bind (count2 kind2)
+          (claw-lisp.core.runtime:assess-loop-progress session tool-calls results)
+        (%assert (= 2 count2)
+                 "Expected second interleaved no-write turn to increment to 2, got ~A" count2)
+        (%assert (eq :stall kind2)
+                 "Expected :stall nudge at threshold for interleaved no-write turn, got ~A" kind2)))))
+
+(defun test-read-suppression-forces-write-after-stall ()
+  "Integration: after two no-write read turns the loop nudges and suppresses
+   read-only tools; on the next turn (reads excluded) the model writes and the
+   loop makes progress. Asserts both that file-read was excluded from the offered
+   tool set on the post-suppression turn and that the write actually applied."
   (let* ((root (merge-pathnames
-                (format nil "claw-lisp-shell-pivot-stagnation-~A/" (get-universal-time))
+                (format nil "claw-lisp-read-suppression-~A/" (get-universal-time))
                 #P"/tmp/"))
          (target-file (merge-pathnames "workspace/target.txt" root))
          (runtime (make-runtime))
@@ -5888,46 +5937,45 @@
                                          :path (namestring target-file)))
            (claw-lisp.core.runtime:register-provider runtime provider)
            (register-tool runtime (make-file-read-tool))
-           (register-tool runtime (make-echo-tool))
+           (register-tool runtime (make-file-write-tool))
            (let* ((session (start-session runtime
                                           :provider-name "shell-pivot"
                                           :model "mock-model"
-                                          :session-id "shell-pivot-stagnation"))
+                                          :session-id "read-suppression-forces-write"))
                   (conversation (claw-lisp.core.domain:agent-session-conversation session)))
              (append-message conversation
                              (make-message :role :user :content "fix the file"))
              (claw-lisp.core.runtime:execute-provider-turn-loop runtime session provider)
              (let ((offered (shell-pivot-provider-tools-offered-on-final-turn provider)))
                (%assert offered
-                        "Expected provider to be called a 4th time (recording offered tools)")
+                        "Expected the post-suppression turn to be reached (offered tools recorded)")
                (%assert (not (member "file-read"
                                      (mapcar (lambda (d) (getf d :name)) offered)
                                      :test #'string=))
-                        "Expected file-read to be excluded on turn 4 after shell-pivot — stagnation must not reset on observational echo"))))
+                        "Expected file-read to be excluded on the post-suppression turn")
+               (%assert (member "file-write"
+                                (mapcar (lambda (d) (getf d :name)) offered)
+                                :test #'string=)
+                        "Expected file-write to remain available on the post-suppression turn"))
+             (%assert (string= "fixed content"
+                               (uiop:read-file-string target-file))
+                      "Expected the suppression-forced write to update the file")))
       (when (probe-file root)
         (uiop:delete-directory-tree root :validate t)))))
 
-(defun test-stagnation-resets-on-write-tool-call ()
-  "Verify that check-for-stagnant-read-only-tool-loop resets to 0 on a write tool."
+(defun test-stall-counter-unaffected-when-no-tool-calls ()
+  "assess-loop-progress with no tool calls returns the current count and no nudge."
   (let ((session (claw-lisp.core.domain:make-agent-session
-                  :id "stagnation-write-reset"
+                  :id "stall-no-tool-calls"
                   :provider "mock"
                   :model "mock"
                   :conversation (claw-lisp.core.domain:make-conversation :id "x"))))
     (claw-lisp.core.runtime::set-session-state-value
-     session :read-only-tool-loop-repeat-count 2)
-    (let ((tool-calls (list (list :id "w1" :name "file-write"
-                                  :input (list :path "f.py" :content "")))))
-      (multiple-value-bind (count nudge-p)
-          (claw-lisp.core.runtime::check-for-stagnant-read-only-tool-loop
-           session tool-calls)
-        (%assert (= 0 count)
-                 "Expected count=0 after file-write, got ~A" count)
-        (%assert (null nudge-p)
-                 "Expected no nudge after file-write, got ~A" nudge-p)
-        (%assert (= 0 (claw-lisp.core.runtime::session-state-value
-                       session :read-only-tool-loop-repeat-count 0))
-                 "Expected session state reset to 0 after write")))))
+     session :read-only-tool-loop-repeat-count 1)
+    (multiple-value-bind (count nudge-kind)
+        (claw-lisp.core.runtime:assess-loop-progress session nil nil)
+      (%assert (= 1 count) "Expected count preserved at 1 with no tool calls, got ~A" count)
+      (%assert (null nudge-kind) "Expected no nudge with no tool calls, got ~A" nudge-kind))))
 
 (defun test-model-family-dispatch ()
   (%assert (eq :moonshot (claw-lisp.core.system-prompt:model-family "moonshotai/kimi-k2.6"))
@@ -6290,11 +6338,12 @@
   (test-tool-classification-agreement-across-subsystems)
   (test-tool-capability-method-matches-registry)
   (run-tool-envelope-tests)
-  ;; Agent loop improvements: stagnation reset fix
-  (test-stagnation-not-reset-by-observational-shell-command)
-  (test-stagnation-resets-on-write-tool-call)
+  ;; Agent loop rebuild Step D: unified progress assessment
+  (test-read-suppression-forces-write-after-stall)
+  (test-stall-increments-on-no-write-turn-with-interleaved-shell)
+  (test-stall-counter-unaffected-when-no-tool-calls)
   (test-failed-write-advances-stagnation-to-nudge-threshold)
-  (test-successful-write-does-not-advance-stagnation)
+  (test-successful-write-resets-stagnation)
   ;; Agent loop improvements: model-family dispatch and differential reflection
   (test-model-family-dispatch)
   (test-build-system-prompt-selects-directive-for-kimi)

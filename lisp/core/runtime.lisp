@@ -969,57 +969,74 @@ that starts with '[' and contains 'error' or 'timed out'."
    Classification flows through the capability source of truth."
   (tool-name-mutation-p (getf tool-call :name)))
 
-(defun check-for-stagnant-read-only-tool-loop (session tool-calls)
-  "Track consecutive read-only tool-call turns and fail closed on stagnation.
+(defun successful-write-result-p (result)
+  "Return true when RESULT is a file-mutation that succeeded — the only thing
+   that counts as genuine loop progress."
+  (and (tool-name-mutation-p (claw-lisp.core.domain:tool-result-tool-name result))
+       (not (tool-result-error-p result))))
 
-   Three-way classification per tool batch:
-   - All read-only  → increment stagnation counter; nudge/fail on threshold.
-   - Any write tool → genuine progress; reset counter to 0.
-   - Other (shell-command, echo, etc.) → maintain current count without
-     increment. Observational shell calls (e.g. 'cat file') must not be
-     treated as progress and must not re-enable read-only tools."
+(defun failed-write-result-p (result)
+  "Return true when RESULT is a file-mutation that errored."
+  (and (tool-name-mutation-p (claw-lisp.core.domain:tool-result-tool-name result))
+       (tool-result-error-p result)))
+
+(defun assess-loop-progress (session tool-calls new-results)
+  "Unified per-turn progress assessment for the coding loop (design doc Step D).
+
+   Runs AFTER tool execution and classifies the turn by its RESULTS, not by the
+   shape of the requested tool batch. A single rule replaces the previous trio
+   (read-only stagnation guard + failed-write advance + observational-shell
+   special case):
+
+   - Successful write present → progress. Reset the stall counter to 0; the
+     model has earned the right to inspect again.
+   - Failed write present (and no successful write) → the model has the file in
+     context but its edit did not apply. Advance the counter to the nudge
+     threshold so read tools are suppressed next turn, and request the
+     failed-write recovery nudge.
+   - No successful write at all → stall. Increment the counter. THIS IS THE KEY
+     FIX: any turn that does not mutate a file is a stall, regardless of whether
+     it interleaves reads, greps, or observational shell commands (e.g. running
+     the test suite). Previously a turn like [file-read, file-read,
+     shell-command] dodged stall detection because it was not *purely*
+     read-only, so the nudge and read-tool suppression never engaged.
+
+   Fails closed past the hard limit. Returns (values stall-count nudge-kind),
+   where NUDGE-KIND is :write-failed | :stall | NIL."
   (cond
-    ((and tool-calls (every #'read-only-tool-call-p tool-calls))
+    ;; Progress: a successful write resets the loop.
+    ((some #'successful-write-result-p new-results)
+     (set-session-state-value session :read-only-tool-loop-repeat-count 0)
+     (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
+     (values 0 nil))
+    ;; Failed write: model already has the file; force a rewrite, suppress reads.
+    ((some #'failed-write-result-p new-results)
+     (let ((advanced (max (1+ (session-state-value session :read-only-tool-loop-repeat-count 0))
+                          +read-only-tool-loop-nudge-threshold+)))
+       (set-session-state-value session :read-only-tool-loop-repeat-count advanced)
+       (when (> advanced +max-stagnant-read-only-tool-iterations+)
+         (error "Repeated failed-write loop detected for session ~A. The model could not apply a working edit despite read-tool suppression and a recovery nudge."
+                (claw-lisp.core.domain:agent-session-id session)))
+       (values advanced :write-failed)))
+    ;; Stall: tool calls but no file mutation this turn.
+    (tool-calls
      (let* ((signature (mapcar #'tool-call-signature tool-calls))
-            (repeat-count (session-state-value session :read-only-tool-loop-repeat-count 0))
             (nudge-signature (session-state-value session :last-read-only-tool-loop-nudge-signature nil))
-            (new-count (1+ repeat-count))
+            (new-count (1+ (session-state-value session :read-only-tool-loop-repeat-count 0)))
             (nudge-needed-p (and (>= new-count +read-only-tool-loop-nudge-threshold+)
                                  (not (equal signature nudge-signature)))))
        (set-session-state-value session :read-only-tool-loop-repeat-count new-count)
        (when nudge-needed-p
          (set-session-state-value session
-                                  :last-read-only-tool-loop-nudge-signature
-                                  signature))
+                                  :last-read-only-tool-loop-nudge-signature signature))
        (when (> new-count +max-stagnant-read-only-tool-iterations+)
-         (error "Repeated read-only tool loop detected for session ~A. The model reread the same inputs without progressing to write or test actions."
-                (claw-lisp.core.domain:agent-session-id session)))
-       (values new-count nudge-needed-p)))
-    ((and tool-calls (some #'write-tool-call-p tool-calls))
-     (set-session-state-value session :read-only-tool-loop-repeat-count 0)
-     (set-session-state-value session :last-read-only-tool-loop-nudge-signature nil)
-     (values 0 nil))
+         (error "Stagnant coding loop detected for session ~A. The model made no file-modifying progress over ~D consecutive turns despite read-tool suppression and a progression nudge."
+                (claw-lisp.core.domain:agent-session-id session)
+                new-count))
+       (values new-count (when nudge-needed-p :stall))))
+    ;; No tool calls at all → nothing to assess.
     (t
      (values (session-state-value session :read-only-tool-loop-repeat-count 0) nil))))
-
-(defun maybe-advance-stagnation-on-failed-write (session new-results)
-  "When any write tool result is an error, advance the stagnation counter to the
-   nudge threshold so read-only tools are suppressed on the next provider turn.
-   Returns T when a failed write is detected, NIL otherwise.
-
-   This prevents the post-failed-write reread loop: a model that tries file-replace,
-   gets a mismatch error, and then falls back to file-read already has the file
-   contents in context and must use file-write with the full corrected content."
-  (when (some (lambda (result)
-                (and (tool-name-mutation-p
-                      (claw-lisp.core.domain:tool-result-tool-name result))
-                     (tool-result-error-p result)))
-              new-results)
-    (let ((current (session-state-value session :read-only-tool-loop-repeat-count 0)))
-      (when (< current +read-only-tool-loop-nudge-threshold+)
-        (set-session-state-value session :read-only-tool-loop-repeat-count
-                                 +read-only-tool-loop-nudge-threshold+)))
-    t))
 
 (defun ensure-turn-not-in-flight (session)
   "Signal an error when SESSION already has a turn executing."
@@ -1129,35 +1146,36 @@ that starts with '[' and contains 'error' or 'timed out'."
                     (%transition-coding-phase session :edit "tool calls requested"
                                               :clear-last-verify-result t))
                   (when tool-calls
-                    (multiple-value-bind (read-only-repeat-count nudge-needed-p)
-                        (check-for-stagnant-read-only-tool-loop session tool-calls)
-                      (let ((result-count-before
-                              (length (claw-lisp.core.domain:conversation-tool-results conversation))))
-                        (dolist (tool-call tool-calls)
-                          (handler-case
-                              (execute-registered-tool runtime
-                                                       session
-                                                       (getf tool-call :name)
-                                                       (getf tool-call :input)
-                                                       :call-id (getf tool-call :id))
-                            (error (e)
-                              (let ((error-result
-                                      (claw-lisp.core.domain:make-tool-result
-                                       :call-id (or (getf tool-call :id) "")
-                                       :tool-name (or (getf tool-call :name) "")
-                                       :content (format nil "[error] Tool ~A failed: ~A"
-                                                        (getf tool-call :name) e))))
-                                (claw-lisp.core.domain:record-tool-result
-                                 (claw-lisp.core.domain:agent-session-conversation session)
-                                 error-result)))))
-                        (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
-                               (new-results (nthcdr result-count-before all-results))
-                               (write-failed-p (maybe-advance-stagnation-on-failed-write session new-results))
-                               (reflection-text (make-differential-reflection-text new-results))
-                               (progression-nudge (cond
-                                                    (write-failed-p +failed-write-recovery-nudge-text+)
-                                                    (nudge-needed-p (read-only-loop-progression-nudge-text))
-                                                    (t nil))))
+                    (let ((result-count-before
+                            (length (claw-lisp.core.domain:conversation-tool-results conversation))))
+                      (dolist (tool-call tool-calls)
+                        (handler-case
+                            (execute-registered-tool runtime
+                                                     session
+                                                     (getf tool-call :name)
+                                                     (getf tool-call :input)
+                                                     :call-id (getf tool-call :id))
+                          (error (e)
+                            (let ((error-result
+                                    (claw-lisp.core.domain:make-tool-result
+                                     :call-id (or (getf tool-call :id) "")
+                                     :tool-name (or (getf tool-call :name) "")
+                                     :content (format nil "[error] Tool ~A failed: ~A"
+                                                      (getf tool-call :name) e))))
+                              (claw-lisp.core.domain:record-tool-result
+                               (claw-lisp.core.domain:agent-session-conversation session)
+                               error-result)))))
+                      (let* ((all-results (claw-lisp.core.domain:conversation-tool-results conversation))
+                             (new-results (nthcdr result-count-before all-results)))
+                        (multiple-value-bind (stall-count nudge-kind)
+                            (assess-loop-progress session tool-calls new-results)
+                          (let* ((write-failed-p (eq nudge-kind :write-failed))
+                                 (stall-nudge-p (eq nudge-kind :stall))
+                                 (reflection-text (make-differential-reflection-text new-results))
+                                 (progression-nudge (ecase nudge-kind
+                                                      (:write-failed +failed-write-recovery-nudge-text+)
+                                                      (:stall (read-only-loop-progression-nudge-text))
+                                                      ((nil) nil))))
                           (when new-results
                             (let ((result-msg (make-tool-result-message
                                                new-results
@@ -1171,15 +1189,15 @@ that starts with '[' and contains 'error' or 'timed out'."
                                (list :event "tool_results_sent"
                                      :session_id (claw-lisp.core.domain:agent-session-id session)
                                      :count (length new-results)
-                                     :progression_nudge_p (and nudge-needed-p t)
+                                     :progression_nudge_p (and stall-nudge-p t)
                                      :write_failed_p (and write-failed-p t)))
-                              (when nudge-needed-p
+                              (when stall-nudge-p
                                 (maybe-append-transcript-event
                                  session
                                  transcript-path
                                  (list :event "tool_loop_nudge"
                                        :session_id (claw-lisp.core.domain:agent-session-id session)
-                                       :repeat_count read-only-repeat-count
+                                       :repeat_count stall-count
                                        :tool_names (mapcar (lambda (tool-call)
                                                              (getf tool-call :name))
                                                            tool-calls))))
@@ -1195,7 +1213,7 @@ that starts with '[' and contains 'error' or 'timed out'."
                                     :messages (claw-lisp.core.domain:conversation-messages conversation)
                                     :tool-results new-results)
                                    :pass :augmented
-                                   :force-refresh nil)))))))))
+                                   :force-refresh nil))))))))))
                   (when tool-calls
                     ;; Increment phase counter for current phase
                     (let ((current-phase (claw-lisp.core.phases:get-current-phase session)))
