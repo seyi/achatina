@@ -77,7 +77,7 @@ Docker CLI path forwards it into the container automatically. Today that covers:
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
-- `OPEN_ROUTER_API_KEY` (accepted as an alias for `OPENROUTER_API_KEY`)
+- `OPEN_ROUTER_API_KEY`
 
 Once inside the CLI, use:
 
@@ -181,7 +181,7 @@ Anthropic provider registered, but credentials are not configured.
 ```
 
 The same passthrough pattern also works for `OPENAI_API_KEY`,
-`OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` (alias) when those providers are
+`OPENROUTER_API_KEY`, and `OPEN_ROUTER_API_KEY` when those providers are
 configured locally.
 
 ## Supported Providers In This Build
@@ -216,18 +216,59 @@ Why this path is useful:
 
 ## Provider And Model Naming
 
-The CLI accepts both canonical model names and some short aliases.
+### `:models` vs `:model` (list vs select)
 
-Examples:
+These two commands look alike but do different things:
 
-- canonical: `claude-sonnet-4-6`
-- alias: `claude-sonnet`
+| Command | Meaning |
+| --- | --- |
+| `:models` | **List** known models for the current provider (plural = list) |
+| `:models <provider-name>` | List known models for a specific provider |
+| `:model` | **Show** the current model (singular = the one in use) |
+| `:model <model-id>` | **Set** the current model |
+| `:use <provider-name> <model-id> [profile]` | Atomically set provider, model, and optional profile in one step |
 
-Recommendations:
+Mnemonic: plural `:models` lists; singular `:model` shows or sets the one you are on.
 
-- use `:models` to see known canonical names for the current provider
+### Model IDs and aliases
+
+The CLI accepts canonical model names, a few built-in short aliases, and any
+provider-prefixed model ID.
+
+Built-in aliases (Anthropic):
+
+| Alias | Resolves to |
+| --- | --- |
+| `claude-sonnet` | `claude-sonnet-4-6` |
+| `claude-opus` | `claude-opus-4-6` |
+| `claude-haiku` | `claude-haiku-4-5` |
+
+### Using models that are not in the built-in list
+
+You are not limited to the registered names. Model IDs are resolved through a
+fallback chain: exact match, then alias, then prefix match, then a provider
+default inferred from the ID, and finally a minimal default. A model ID
+containing a `/` is treated as an OpenRouter-style `provider/model` and routed
+to the `openrouter` provider.
+
+So any OpenRouter model works by passing its full ID, for example:
+
+```
+:use openrouter qwen/qwen3.7-max
+:use openrouter x-ai/grok-4.20
+:use openrouter moonshotai/kimi-k2.6
+```
+
+Unregistered models run with default capabilities (tool use, streaming) rather
+than a model-specific capability profile; behavior is otherwise normal.
+
+### Recommendations
+
+- use `:models` to see the known canonical names for the current provider
 - prefer canonical names in bug reports and examples
-- if provider/model selection fails, check provider compatibility before assuming credentials are wrong
+- if provider/model selection fails, check provider compatibility first before
+  assuming credentials are wrong (an unknown-but-well-formed ID will still be
+  accepted; a real provider call then surfaces any credential or access error)
 
 ## Current Reality
 
