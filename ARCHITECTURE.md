@@ -95,6 +95,16 @@ See:
 
 - `COMPACTION.md`
 
+## Coding Agent Loop
+
+The runtime drives an LLM through a bounded coding task (inspect → edit → verify
+→ complete) using a synchronous, turn-based tool-calling loop with an explicit
+stagnation guard, capability-based tool classification, and completion triggers.
+
+See:
+
+- `AGENT_LOOP.md`
+
 ## Repository Scope
 
 The current repository centers on:

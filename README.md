@@ -76,6 +76,7 @@ See:
 
 - `QUICKSTART.md`
 - `ARCHITECTURE.md`
+- `AGENT_LOOP.md`
 - `COMPACTION.md`
 - `LICENSING.md`
 
@@ -86,6 +87,7 @@ Use this path by intent:
 - if you want to understand what the project is: `README.md`
 - if you want the fastest successful local evaluation path: `QUICKSTART.md`
 - if you want the staged runtime/IR model: `ARCHITECTURE.md`
+- if you want how the coding agent loop drives a task to completion: `AGENT_LOOP.md`
 - if you want the context-management story: `COMPACTION.md`
 - if you want licensing details: `LICENSING.md`
 
