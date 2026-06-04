@@ -270,6 +270,55 @@ than a model-specific capability profile; behavior is otherwise normal.
   assuming credentials are wrong (an unknown-but-well-formed ID will still be
   accepted; a real provider call then surfaces any credential or access error)
 
+## Inspecting A Session: `:transcript` And `:compaction`
+
+The runtime is observable, not a black box. Two CLI commands expose what it is
+doing internally and are the strongest way to evaluate the runtime's behavior
+without instrumenting anything yourself.
+
+### `:transcript` — the structured session event log
+
+Every turn writes a structured, append-only JSON event log: session/turn
+lifecycle, each tool call and result, phase transitions, compaction events, and
+more. Inspect it from inside the CLI:
+
+```text
+:transcript          ; summary (path, line/event/message counts, last event)
+:transcript tail     ; last 10 event lines
+:transcript tail 50  ; last N lines (max 200)
+```
+
+Why it matters for evaluation:
+
+- it is a durable, machine-readable record of the run — the same log the
+  non-interactive runner writes, so interactive inspection and automated runs
+  share one source of truth
+- it makes tool use auditable — you can see exactly which tools ran, with what
+  inputs, and whether each succeeded or errored
+- the summary surfaces malformed-line counts, so transcript health is visible
+
+### `:compaction` — context-window pressure and management
+
+The runtime monitors context pressure and compacts local history before it
+overflows rather than failing hard. `:compaction` shows that state live:
+
+```text
+:compaction
+```
+
+It reports current tokens vs the effective window, the warning and compaction
+thresholds, whether a warning or compaction is currently needed, the compaction
+failure count and circuit-breaker state, and the last compaction event recorded
+in the transcript.
+
+Why it matters for evaluation:
+
+- it demonstrates graceful degradation under context pressure, not just a hard
+  context-limit failure
+- the thresholds and circuit state make the behavior predictable and inspectable
+
+For the design and rationale behind this behavior, see `COMPACTION.md`.
+
 ## Current Reality
 
 This repository is strongest today as:
